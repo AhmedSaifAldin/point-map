@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_23dfdfff7d32faa301628bdf74101ed3 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+
+            <style>html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            </style>
+
+            <style>#map {
+                position:absolute;
+                top:0;
+                bottom:0;
+                right:0;
+                left:0;
+                }
+            </style>
+
+            <script>
+                L_NO_TOUCH = false;
+                L_DISABLE_3D = false;
+            </script>
+
+        
+</head>
+<body>
+    
+    
+            <div class="folium-map" id="map_23dfdfff7d32faa301628bdf74101ed3" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_23dfdfff7d32faa301628bdf74101ed3 = L.map(
+                "map_23dfdfff7d32faa301628bdf74101ed3",
+                {
+                    center: [24.645677, 46.814671000000004],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  "zoom": 13,
+  "zoomControl": true,
+  "preferCanvas": false,
+}
+
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_0453eaa10f9207544259d566ed903b14 = L.tileLayer(
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                {
+  "minZoom": 0,
+  "maxZoom": 18,
+  "maxNativeZoom": 18,
+  "noWrap": false,
+  "attribution": "Tiles \u0026copy; Esri \u0026mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+  "subdomains": "abc",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 1,
+}
+
+            );
+        
+    
+            tile_layer_0453eaa10f9207544259d566ed903b14.addTo(map_23dfdfff7d32faa301628bdf74101ed3);
+        
+    
+            var marker_730b79ae84ae3cc2278903fe9df31a77 = L.marker(
+                [24.682343, 46.806446],
+                {
+}
+            ).addTo(map_23dfdfff7d32faa301628bdf74101ed3);
+        
+    
+        var popup_e2b95c2403e24d8d9ff2dcd621c764b9 = L.popup({
+  "maxWidth": 300,
+});
+
+        
+            
+                var html_fedfdc502f27b8f324915d7385166adf = $(`<div id="html_fedfdc502f27b8f324915d7385166adf" style="width: 100.0%; height: 100.0%;">         <div style="font-family: Tahoma; text-align: right; direction: rtl;">             <b>الملاحظة:</b> موقع 1<br><br>             <a href="https://maps.app.goo.gl/9E6FiK6gG3h5jgVk8" target="_blank" style="background: #27ae60; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">الذهاب للموقع ↗</a>         </div>         </div>`)[0];
+                popup_e2b95c2403e24d8d9ff2dcd621c764b9.setContent(html_fedfdc502f27b8f324915d7385166adf);
+            
+        
+
+        marker_730b79ae84ae3cc2278903fe9df31a77.bindPopup(popup_e2b95c2403e24d8d9ff2dcd621c764b9)
+        ;
+
+        
+    
+    
+            marker_730b79ae84ae3cc2278903fe9df31a77.bindTooltip(
+                `<div>
+                     موقع 1
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var marker_72e45718e87dc09fa4e76ba6b850045e = L.marker(
+                [24.579203, 46.792731],
+                {
+}
+            ).addTo(map_23dfdfff7d32faa301628bdf74101ed3);
+        
+    
+        var popup_7b9e7f37c7cc4dee944bb39005f9aa73 = L.popup({
+  "maxWidth": 300,
+});
+
+        
+            
+                var html_6fed7002a443c7c832769c9adb3185a9 = $(`<div id="html_6fed7002a443c7c832769c9adb3185a9" style="width: 100.0%; height: 100.0%;">         <div style="font-family: Tahoma; text-align: right; direction: rtl;">             <b>الملاحظة:</b> موقع 2<br><br>             <a href="https://maps.app.goo.gl/durxa2mZ6zP4988v8" target="_blank" style="background: #27ae60; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">الذهاب للموقع ↗</a>         </div>         </div>`)[0];
+                popup_7b9e7f37c7cc4dee944bb39005f9aa73.setContent(html_6fed7002a443c7c832769c9adb3185a9);
+            
+        
+
+        marker_72e45718e87dc09fa4e76ba6b850045e.bindPopup(popup_7b9e7f37c7cc4dee944bb39005f9aa73)
+        ;
+
+        
+    
+    
+            marker_72e45718e87dc09fa4e76ba6b850045e.bindTooltip(
+                `<div>
+                     موقع 2
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var marker_ecdfbb87eabf0a91ddc5dff9e2335e50 = L.marker(
+                [24.658727, 46.815325],
+                {
+}
+            ).addTo(map_23dfdfff7d32faa301628bdf74101ed3);
+        
+    
+        var popup_0c146d35d36753c3a15acbcac85a4090 = L.popup({
+  "maxWidth": 300,
+});
+
+        
+            
+                var html_673fd6321c480cebc0d542f597fe9144 = $(`<div id="html_673fd6321c480cebc0d542f597fe9144" style="width: 100.0%; height: 100.0%;">         <div style="font-family: Tahoma; text-align: right; direction: rtl;">             <b>الملاحظة:</b> موقع 6<br><br>             <a href="https://maps.app.goo.gl/8sNbZH6HoHojfVjr9" target="_blank" style="background: #27ae60; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">الذهاب للموقع ↗</a>         </div>         </div>`)[0];
+                popup_0c146d35d36753c3a15acbcac85a4090.setContent(html_673fd6321c480cebc0d542f597fe9144);
+            
+        
+
+        marker_ecdfbb87eabf0a91ddc5dff9e2335e50.bindPopup(popup_0c146d35d36753c3a15acbcac85a4090)
+        ;
+
+        
+    
+    
+            marker_ecdfbb87eabf0a91ddc5dff9e2335e50.bindTooltip(
+                `<div>
+                     موقع 6
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var marker_f0e37308c39cfad4716b73eb184f296c = L.marker(
+                [24.662435, 46.844182],
+                {
+}
+            ).addTo(map_23dfdfff7d32faa301628bdf74101ed3);
+        
+    
+        var popup_ea81543ba3243da79925d9c5bfca86d3 = L.popup({
+  "maxWidth": 300,
+});
+
+        
+            
+                var html_315ccab0ed267543906a8e9e6fddfb86 = $(`<div id="html_315ccab0ed267543906a8e9e6fddfb86" style="width: 100.0%; height: 100.0%;">         <div style="font-family: Tahoma; text-align: right; direction: rtl;">             <b>الملاحظة:</b> موقع 6 أ<br><br>             <a href="https://maps.app.goo.gl/dp78DVtpkTNYdj3r6" target="_blank" style="background: #27ae60; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">الذهاب للموقع ↗</a>         </div>         </div>`)[0];
+                popup_ea81543ba3243da79925d9c5bfca86d3.setContent(html_315ccab0ed267543906a8e9e6fddfb86);
+            
+        
+
+        marker_f0e37308c39cfad4716b73eb184f296c.bindPopup(popup_ea81543ba3243da79925d9c5bfca86d3)
+        ;
+
+        
+    
+    
+            marker_f0e37308c39cfad4716b73eb184f296c.bindTooltip(
+                `<div>
+                     موقع 6 أ
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+</script>
+</html>
