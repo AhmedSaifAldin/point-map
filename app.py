@@ -106,17 +106,27 @@ def save_custom_point(
 def get_available_shapefiles():
   shapes_dir = os.path.join(UPLOAD_FOLDER, 'shapes')
   shapefiles_list = []
+  seen_names = set()
   if os.path.exists(shapes_dir):
     for root, dirs, files in os.walk(shapes_dir):
       for file in files:
         if file.endswith('.shp'):
-          proj_name = os.path.splitext(file)[0]
           rel_path = os.path.relpath(os.path.join(root, file), shapes_dir)
-          display_name = proj_name.replace('_', ' ').replace('&', ' & ').title()
-          shapefiles_list.append({
-              'id': rel_path.replace('\\', '/'),
-              'name': display_name,
-          })
+          folder_name = os.path.basename(root)
+          
+          if folder_name and folder_name != 'shapes':
+            display_name = folder_name
+          else:
+            proj_name = os.path.splitext(file)[0]
+            display_name = proj_name.replace('_', ' ').replace('&', ' & ').title()
+
+          # إضافة العنصر فقط إذا لم يتم إضافته مسبقاً
+          if display_name not in seen_names:
+            seen_names.add(display_name)
+            shapefiles_list.append({
+                'id': rel_path.replace('\\', '/'),
+                'name': display_name,
+            })
   return shapefiles_list
 
 
@@ -304,7 +314,7 @@ def login():
     <head>
         <meta charset="UTF-8">
         <title>تسجيل الدخول - نظام الخريطة</title>
-        <link rel="icon" href="{{ url_for('static', filename='logo.png') }}" type="image/png">
+        <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
         <style>
             body { margin: 0; padding: 0; font-family: Tahoma, sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; }
             .login-card { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 320px; box-sizing: border-box; }
@@ -501,7 +511,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <title>نظام إدارة ومتابعة المواقع والمشاريع</title>
-        <link rel="icon" href="{{ url_for('static', filename='logo.png') }}" type="image/png">
+        <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
         <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
