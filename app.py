@@ -457,6 +457,7 @@ def login():
         <meta charset="UTF-8">
         <title>تسجيل الدخول - نظام إدارة الإحداثيات  </title>
         <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
+        
         <style>
             body { margin: 0; padding: 0; font-family: Tahoma, sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; }
             .login-card { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 320px; box-sizing: border-box; }
