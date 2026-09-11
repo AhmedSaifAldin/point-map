@@ -77,6 +77,8 @@ def load_custom_points():
         for p in points:
           if 'neighborhood' not in p:
             p['neighborhood'] = '-'
+          if 'extra_details' not in p:
+            p['extra_details'] = {}
         return points
     except Exception:
       return []
@@ -84,8 +86,10 @@ def load_custom_points():
 
 
 def save_custom_point(
-    lat, lon, note, url='#', project='  ', neighborhood='-'
+    lat, lon, note, url='#', project=' ', neighborhood='-', extra_details=None
 ):
+  if extra_details is None:
+    extra_details = {}
   points = load_custom_points()
   points.append({
       'lat': lat,
@@ -94,7 +98,24 @@ def save_custom_point(
       'url': url,
       'project': project,
       'neighborhood': neighborhood,
+      'extra_details': extra_details,
   })
+
+  try:
+    with open(CUSTOM_POINTS_FILE, 'w', encoding='utf-8') as f:
+      json.dump(points, f, ensure_ascii=False)
+  except Exception:
+    pass
+
+
+def save_custom_points_bulk(new_points):
+  points = load_custom_points()
+  for p in new_points:
+    if 'neighborhood' not in p:
+      p['neighborhood'] = '-'
+    if 'extra_details' not in p:
+      p['extra_details'] = {}
+    points.append(p)
 
   try:
     with open(CUSTOM_POINTS_FILE, 'w', encoding='utf-8') as f:
@@ -113,14 +134,13 @@ def get_available_shapefiles():
         if file.endswith('.shp'):
           rel_path = os.path.relpath(os.path.join(root, file), shapes_dir)
           folder_name = os.path.basename(root)
-          
+
           if folder_name and folder_name != 'shapes':
             display_name = folder_name
           else:
             proj_name = os.path.splitext(file)[0]
             display_name = proj_name.replace('_', ' ').replace('&', ' & ').title()
 
-          # إضافة العنصر فقط إذا لم يتم إضافته مسبقاً
           if display_name not in seen_names:
             seen_names.add(display_name)
             shapefiles_list.append({
@@ -131,9 +151,48 @@ def get_available_shapefiles():
 
 
 def load_shapefile_as_geojson(proj_id):
-  if not proj_id or proj_id == 'ALL':
-    return None
   shapes_dir = os.path.join(UPLOAD_FOLDER, 'shapes')
+  features_list = []
+
+  if not proj_id or proj_id == 'ALL':
+    if os.path.exists(shapes_dir):
+      for root, dirs, files in os.walk(shapes_dir):
+        for file in files:
+          if file.endswith('.shp'):
+            try:
+              gdf = gpd.read_file(os.path.join(root, file))
+              if gdf.crs != 'EPSG:4326':
+                gdf = gdf.to_crs(epsg=4326)
+
+              folder_name = os.path.basename(root)
+              if folder_name and folder_name != 'shapes':
+                proj_display = folder_name
+              else:
+                proj_display = os.path.splitext(file)[0].replace('_', ' ').title()
+
+              for _, row in gdf.iterrows():
+                geom_json = row['geometry'].__geo_interface__
+                props = row.drop('geometry').to_dict()
+                props = {
+                    str(k): (
+                        str(v)
+                        if pd.notna(v)
+                        else ''
+                    )
+                    for k, v in props.items()
+                }
+                props['parent_project_name'] = proj_display
+                features_list.append({
+                    'type': 'Feature',
+                    'geometry': geom_json,
+                    'properties': props,
+                })
+            except Exception:
+              pass
+    if features_list:
+      return {'type': 'FeatureCollection', 'features': features_list}
+    return None
+
   shp_path = os.path.join(shapes_dir, proj_id)
   if not os.path.exists(shp_path):
     for root, dirs, files in os.walk(shapes_dir):
@@ -143,12 +202,37 @@ def load_shapefile_as_geojson(proj_id):
         ):
           shp_path = os.path.join(root, file)
           break
+
   if os.path.exists(shp_path):
     try:
       gdf = gpd.read_file(shp_path)
       if gdf.crs != 'EPSG:4326':
         gdf = gdf.to_crs(epsg=4326)
-      return json.loads(gdf.to_json())
+
+      folder_name = os.path.basename(os.path.dirname(shp_path))
+      if folder_name and folder_name != 'shapes':
+        proj_display = folder_name
+      else:
+        proj_display = os.path.splitext(os.path.basename(shp_path))[0].replace('_', ' ').title()
+
+      for _, row in gdf.iterrows():
+        geom_json = row['geometry'].__geo_interface__
+        props = row.drop('geometry').to_dict()
+        props = {
+            str(k): (
+                str(v)
+                if pd.notna(v)
+                else ''
+            )
+            for k, v in props.items()
+        }
+        props['parent_project_name'] = proj_display
+        features_list.append({
+            'type': 'Feature',
+            'geometry': geom_json,
+            'properties': props,
+        })
+      return {'type': 'FeatureCollection', 'features': features_list}
     except Exception as e:
       print('Error loading shapefile:', e)
   return None
@@ -157,6 +241,7 @@ def load_shapefile_as_geojson(proj_id):
 def enrich_locations_with_shape_data(locations, proj_id):
   shapes_dir = os.path.join(UPLOAD_FOLDER, 'shapes')
   gdfs = []
+  
   if proj_id and proj_id != 'ALL':
     shp_path = os.path.join(shapes_dir, proj_id)
     if not os.path.exists(shp_path):
@@ -172,7 +257,9 @@ def enrich_locations_with_shape_data(locations, proj_id):
         gdf = gpd.read_file(shp_path)
         if gdf.crs != 'EPSG:4326':
           gdf = gdf.to_crs(epsg=4326)
-        gdfs.append(gdf)
+        folder_name = os.path.basename(os.path.dirname(shp_path))
+        proj_display = folder_name if (folder_name and folder_name != 'shapes') else os.path.splitext(os.path.basename(shp_path))[0].replace('_', ' ').title()
+        gdfs.append((gdf, proj_display))
       except Exception:
         pass
   else:
@@ -181,10 +268,13 @@ def enrich_locations_with_shape_data(locations, proj_id):
         for file in files:
           if file.endswith('.shp'):
             try:
-              gdf = gpd.read_file(os.path.join(root, file))
+              full_shp_path = os.path.join(root, file)
+              gdf = gpd.read_file(full_shp_path)
               if gdf.crs != 'EPSG:4326':
                 gdf = gdf.to_crs(epsg=4326)
-              gdfs.append(gdf)
+              folder_name = os.path.basename(root)
+              proj_display = folder_name if (folder_name and folder_name != 'shapes') else os.path.splitext(file)[0].replace('_', ' ').title()
+              gdfs.append((gdf, proj_display))
             except Exception:
               pass
 
@@ -192,11 +282,14 @@ def enrich_locations_with_shape_data(locations, proj_id):
     lat = loc.get('lat')
     lon = loc.get('lon')
     round_id_val = '-'
+    matched_project = None
+
     if lat and lon:
       pt = Point(lon, lat)
-      for gdf in gdfs:
+      for gdf, proj_name in gdfs:
         matched = gdf[gdf.contains(pt)]
         if not matched.empty:
+          matched_project = proj_name
           props = matched.iloc[0]
           for col in props.index:
             if any(
@@ -213,87 +306,136 @@ def enrich_locations_with_shape_data(locations, proj_id):
                 if pd.notna(val) and str(val).strip() != '':
                   round_id_val = str(val)
                   break
-          if round_id_val != '-':
+          if matched_project:
             break
+
     loc['round_id'] = round_id_val
+    if matched_project:
+      loc['project'] = matched_project
+    elif not loc.get('project') or loc.get('project') == ' ':
+      loc['project'] = ' '
+
     if 'neighborhood' not in loc:
       loc['neighborhood'] = '-'
+      
   return locations
 
 
-def get_resolved_data(file_path):
+def process_excel_file(file_path):
   try:
     df = pd.read_excel(file_path)
   except Exception:
     try:
       df = pd.read_csv(file_path)
     except Exception:
-      return []
+      return
 
   if df.empty or len(df.columns) == 0:
-    return []
+    return
 
-  resolved_data = []
+  lat_col, lon_col, url_col, note_col, project_col = None, None, None, None, None
 
-  for index, row in df.iterrows():
-    url_found = ''
-    extracted_text = ''
-    lat, lon = None, None
-    project_name = 'مشروع عام'
-    neighborhood_name = '-'
+  for col in df.columns:
+    c = str(col).strip().lower()
+    if any(k in c for k in ['lat', 'latitude', 'خط العرض', 'خط_العرض', 'العرض', 'y', 'lat.']):
+      if not any(x in c for x in ['long', 'lon', 'الطول', 'خط الطول']):
+        lat_col = col
+    elif any(k in c for k in ['lon', 'long', 'longitude', 'خط الطول', 'خط_الطول', 'الطول', 'x', 'lon.', 'long.', 'location', 'loc']):
+      lon_col = col
+    elif any(k in c for k in ['url', 'link', 'رابط', 'maps', 'map', 'google', 'map_url', 'loc', 'location']):
+      if not url_col:
+        url_col = col
+    elif any(k in c for k in ['ملاحظات', 'note', 'notes', 'تفاصيل', 'ملاحظة', 'description', 'name', 'title']):
+      if not note_col:
+        note_col = col
+    elif any(k in c for k in ['مشروع', 'project', 'المشروع', 'project_name']):
+      project_col = col
 
+  if lat_col is None or lon_col is None:
     for col in df.columns:
-      val = row[col]
-      if pd.isna(val):
-        continue
-      val_str = str(val).strip()
+      c = str(col).strip().lower()
+      if lat_col is None and ('y' == c or 'lat' in c or 'عرض' in c):
+        lat_col = col
+      if lon_col is None and ('x' == c or 'lon' in c or 'long' in c or 'طول' in c):
+        lon_col = col
 
-      col_lower = str(col).lower()
-      if 'مشروع' in col_lower or 'project' in col_lower:
-        if val_str:
-          project_name = val_str
-        continue
+  bulk_points = []
+  
+  for index, row in df.iterrows():
+    lat, lon, maps_url = None, None, ''
+    note = f'نقطة كشف #{index + 1}'
+    project_name = ' '
+    extra_details = {}
 
-      if 'حي' in col_lower or 'neighborhood' in col_lower or 'district' in col_lower:
-        if val_str:
-          neighborhood_name = val_str
-        continue
-
+    if lat_col is not None and pd.notna(row[lat_col]):
       try:
-        num_val = float(val_str)
-        if 20 < num_val < 35 and not lat:
-          lat = num_val
-          continue
-        elif 35 < num_val < 60 and not lon:
-          lon = num_val
-          continue
-      except ValueError:
+        lat = float(str(row[lat_col]).strip())
+      except Exception:
+        pass
+        
+    if lon_col is not None and pd.notna(row[lon_col]):
+      try:
+        lon = float(str(row[lon_col]).strip())
+      except Exception:
         pass
 
-      if 'http' in val_str or 'goo.gl' in val_str or 'maps' in val_str:
-        url_found = val_str
-      else:
-        if len(val_str) > 0 and not extracted_text:
-          extracted_text = val_str
+    if (lat is None or lon is None):
+      for col in df.columns:
+        val_str = str(row[col]).strip()
+        if 'http' in val_str or 'maps' in val_str or 'goo.gl' in val_str or ',' in val_str:
+          if 'http' in val_str or 'maps' in val_str or 'goo.gl' in val_str:
+            maps_url = val_str
+            lat, lon = get_real_coordinates_from_url(maps_url)
+            if lat and lon:
+              break
+          else:
+            parts = val_str.split(',')
+            if len(parts) == 2:
+              try:
+                potential_lat = float(parts[0].strip())
+                potential_lon = float(parts[1].strip())
+                if 15 <= potential_lat <= 35 and 30 <= potential_lon <= 60:
+                  lat, lon = potential_lat, potential_lon
+                  break
+              except Exception:
+                pass
 
-    note = extracted_text if extracted_text else f'موقع {index + 1}'
+    if (lat is None or lon is None) and url_col is not None and pd.notna(row[url_col]):
+      maps_url = str(row[url_col]).strip()
+      lat, lon = get_real_coordinates_from_url(maps_url)
 
-    if url_found and (not lat or not lon):
-      lat, lon = get_real_coordinates_from_url(url_found)
+    if note_col is not None and pd.notna(row[note_col]):
+      val = row[note_col]
+      if str(val).strip() != '':
+        note = str(val).strip()
 
-    if not lat or not lon:
-      lat, lon = 24.7136, 46.6753
+    if project_col is not None and pd.notna(row[project_col]):
+      val = row[project_col]
+      if str(val).strip() != '':
+        project_name = str(val).strip()
 
-    resolved_data.append({
-        'lat': lat,
-        'lon': lon,
-        'url': url_found if url_found else '#',
-        'note': note,
-        'project': project_name,
-        'neighborhood': neighborhood_name,
-    })
+    for col in df.columns:
+      if col not in [lat_col, lon_col, url_col, note_col, project_col]:
+        val = row[col]
+        if pd.notna(val) and str(val).strip() != '':
+          extra_details[str(col)] = str(val).strip()
 
-  return resolved_data
+    if lat and lon:
+      if 34 <= lat <= 55 and 16 <= lon <= 32:
+        lat, lon = lon, lat
+
+      bulk_points.append({
+          'lat': lat,
+          'lon': lon,
+          'note': note,
+          'url': maps_url if maps_url else '#',
+          'project': project_name,
+          'neighborhood': '-',
+          'extra_details': extra_details,
+      })
+
+  if bulk_points:
+    save_custom_points_bulk(bulk_points)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -362,13 +504,6 @@ def clear_data():
   if not session.get('logged_in'):
     return redirect(url_for('login'))
 
-  temp_file = os.path.join(UPLOAD_FOLDER, 'uploaded_temp.xlsx')
-  if os.path.exists(temp_file):
-    try:
-      os.remove(temp_file)
-    except Exception:
-      pass
-
   if os.path.exists(CUSTOM_POINTS_FILE):
     try:
       os.remove(CUSTOM_POINTS_FILE)
@@ -384,13 +519,14 @@ def index():
     return redirect(url_for('login'))
 
   message = ''
-  temp_file = os.path.join(UPLOAD_FOLDER, 'uploaded_temp.xlsx')
   search_target = None
   selected_shape_project = request.args.get('shape_proj', 'ALL')
 
   if request.method == 'POST':
     action = request.form.get('action')
-    project_name = request.form.get('project_name', 'مشروع عام').strip()
+    project_name = (
+        request.form.get('project_name', ' ').strip() or ' '
+    )
 
     if action == 'search_map_url':
       maps_url = request.form.get('maps_url', '').strip()
@@ -411,7 +547,7 @@ def index():
             'note': maps_note,
             'url': maps_url,
         }
-        message = f'تم حفظ النقطة في مشروع ({project_name}) بنجاح!'
+        message = 'تم حفظ النقطة وتحديد المشروع التابع لها بنجاح!'
       else:
         message = 'تعذر استخراج الإحداثيات من الرابط!'
 
@@ -437,41 +573,40 @@ def index():
       else:
         message = 'تعذر استخراج الإحداثيات للاستعراض!'
 
-    elif action == 'upload':
-      if 'excelFile' in request.files:
-        file = request.files['excelFile']
-        if file.filename != '':
-          file.save(temp_file)
-          message = 'تم رفع الملف بنجاح!'
-
-    elif action == 'add_point':
+    elif action == 'search_coords_save':
       try:
-        lat = float(request.form.get('new_lat'))
-        lon = float(request.form.get('new_lon'))
-        note = request.form.get('new_note', 'نقطة جديدة مضافة').strip()
+        lat = float(request.form.get('coord_lat'))
+        lon = float(request.form.get('coord_lon'))
+        note = request.form.get('coord_note', 'نقطة إحداثيات مضافة').strip()
         save_custom_point(lat, lon, note, '#', project_name)
         search_target = {'lat': lat, 'lon': lon, 'note': note, 'url': '#'}
-        message = f'تمت إضافة النقطة لمشروع ({project_name}) بنجاح!'
+        message = 'تم حفظ الإحداثيات وتحديد المشروع التابع لها بنجاح!'
       except Exception:
         message = 'خطأ في إحداثيات النقطة المضافة!'
 
-  locations = []
-  if os.path.exists(temp_file):
-    locations = get_resolved_data(temp_file)
+    elif action == 'search_coords_preview':
+      try:
+        lat = float(request.form.get('coord_lat'))
+        lon = float(request.form.get('coord_lon'))
+        note = request.form.get('coord_note', 'استعراض ').strip()
+        search_target = {'lat': lat, 'lon': lon, 'note': note, 'url': '#'}
+        message = f'استعراض الإحداثيات مؤقتاً: ({lat}, {lon})'
+      except Exception:
+        message = 'خطأ في إحداثيات الاستعراض!'
 
-  custom_points = load_custom_points()
-  for cp in custom_points:
-    locations.append(cp)
+    elif action in ['upload_links', 'upload_coords']:
+      if 'excelFile' in request.files:
+        file = request.files['excelFile']
+        if file.filename != '':
+          path = os.path.join(UPLOAD_FOLDER, 'temp_excel.xlsx')
+          file.save(path)
+          process_excel_file(path)
+          message = 'تمت إضافة ملف الكشف بنجاح واستخراج المواقع!'
 
+  locations = load_custom_points()
   locations = enrich_locations_with_shape_data(
       locations, selected_shape_project
   )
-
-  projects_set = sorted(
-      list(set(loc.get('project', 'مشروع عام') for loc in locations))
-  )
-  if not projects_set:
-    projects_set = ['مشروع عام']
 
   available_shapes = get_available_shapefiles()
 
@@ -482,17 +617,13 @@ def index():
       break
 
   shape_geojson = load_shapefile_as_geojson(selected_shape_project)
-  effective_project_name = selected_shape_name
 
   grouped_dict = collections.defaultdict(list)
   for loc in locations:
-    if effective_project_name != 'كل المشاريع والمناطق':
-      loc['project'] = effective_project_name
-
     key = (
         round(loc['lat'], 6),
         round(loc['lon'], 6),
-        loc.get('project', 'مشروع عام'),
+        loc.get('project', ' '),
     )
     grouped_dict[key].append(loc)
 
@@ -521,40 +652,70 @@ def index():
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
         
         <style>
-            body { margin: 0; padding: 0; font-family: Tahoma, sans-serif; display: flex; height: 100vh; background: #f4f7f6; overflow: hidden; }
-            .sidebar { width: 440px; background: #fff; box-shadow: 2px 0 10px rgba(0,0,0,0.1); padding: 15px; box-sizing: border-box; z-index: 1000; overflow-y: auto; display: flex; flex-direction: column; }
-            h2 { color: #2c3e50; font-size: 16px; margin-top: 0; margin-bottom: 10px; }
-            .instructions { font-size: 11px; color: #2980b9; background: #ebf5fb; padding: 10px; border-radius: 6px; line-height: 1.5; border-right: 4px solid #2980b9; margin-bottom: 10px; }
-            .form-section { background: #f9f9f9; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #e1e1e1; }
-            .form-section h3 { font-size: 13px; margin: 0 0 8px 0; color: #34495e; }
-            .form-group { margin-bottom: 8px; }
-            label { display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px; color: #34495e; }
-            input[type="file"], input[type="text"], select { width: 100%; padding: 8px; border: 1px solid #bdc3c7; border-radius: 6px; box-sizing: border-box; font-size: 12px; background: #fff; }
-            button { background-color: #27ae60; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 13px; width: 100%; font-weight: bold; transition: background 0.3s; margin-top: 5px; }
+            html, body { margin: 0; padding: 0; font-family: Tahoma, sans-serif; height: 100vh; width: 100vw; overflow: hidden; display: flex; background: #f4f7f6; }
+            
+            .sidebar { width: 440px; height: 100vh; background: #fff; box-shadow: 2px 0 10px rgba(0,0,0,0.1); padding: 15px; box-sizing: border-box; z-index: 1000; display: flex; flex-direction: column; justify-content: space-between; overflow-y: auto; }
+            
+            h2 { color: #2c3e50; font-size: 18px; margin: 0 0 12px 0; text-align: center; }
+            
+            .card-section { background: #fdfdfd; border-radius: 8px; margin-bottom: 12px; border: 1px solid #dcdde1; box-shadow: 0 2px 5px rgba(0,0,0,0.03); overflow: hidden; }
+            .card-header-static { padding: 10px 12px; background: #f1f2f6; display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 13px; color: #34495e; border-bottom: 1px solid #dcdde1; }
+            .card-body-open { padding: 12px; background: #fff; }
+
+            .form-group { margin-bottom: 10px; }
+            label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 12px; color: #34495e; }
+            input[type="text"], select, input[type="file"] { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 6px; box-sizing: border-box; font-size: 13px; background: #fff; font-family: Tahoma, sans-serif; direction: rtl; }
+select { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-image: url('data:image/svg+xml;utf8,<svg fill="%2334495e" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>'); background-repeat: no-repeat; background-position: left 8px center; background-size: 16px; padding-left: 30px; }
+            
+            .drop-zone {
+                border: 2px dashed #e67e22;
+                border-radius: 6px;
+                padding: 15px;
+                text-align: center;
+                background: #fdf8f4;
+                cursor: pointer;
+                transition: background 0.3s, border-color 0.3s;
+                margin-bottom: 8px;
+            }
+            .drop-zone.dragover {
+                background: #fae5d3;
+                border-color: #d35400;
+            }
+            .drop-zone p {
+                margin: 0;
+                font-size: 12px;
+                color: #d35400;
+                font-weight: bold;
+            }
+            
+            button { background-color: #27ae60; color: white; border: none; padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; width: 100%; font-weight: bold; transition: background 0.3s; margin-top: 5px; }
             button:hover { background-color: #219653; }
-            .btn-group { display: flex; gap: 5px; margin-top: 5px; }
+            .btn-group { display: flex; gap: 8px; margin-top: 5px; }
             .btn-preview { background-color: #e67e22 !important; }
             .btn-preview:hover { background-color: #d35400 !important; }
-            .btn-download { background-color: #2980b9 !important; margin-top: 10px; }
+            .btn-download { background-color: #2980b9 !important; padding: 10px; font-size: 13px; margin-top: 10px; }
             .btn-download:hover { background-color: #1f618d !important; }
-            .btn-clear { background-color: #e74c3c !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 13px; box-sizing: border-box; transition: background 0.3s; margin-top: 5px; }
-            .btn-clear:hover { background-color: #c0392b !important; }
-            .btn-logout { background-color: #7f8c8d !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 13px; box-sizing: border-box; transition: background 0.3s; margin-top: 5px; }
-            .btn-logout:hover { background-color: #707b7c !important; }
-            .designer-credit { text-align: center; font-size: 11px; color: #7f8c8d; margin-top: 10px; font-weight: bold; }
-            .alert { background: #d4edda; color: #155724; padding: 8px; border-radius: 6px; font-size: 12px; margin-bottom: 10px; border-right: 4px solid #27ae60; }
             
-            #map-container { flex-grow: 1; height: 100vh; width: 100%; position: relative; display: flex; flex-direction: column; }
-            #map { flex-grow: 1; width: 100%; height: 100%; min-height: 500px; }
+            .actions-bar { display: flex; gap: 8px; margin-top: 8px; }
+            .btn-clear { background-color: #e74c3c !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 13px; box-sizing: border-box; flex: 1; transition: background 0.3s; }
+            .btn-clear:hover { background-color: #c0392b !important; }
+            .btn-logout { background-color: #7f8c8d !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: bold; font-size: 13px; box-sizing: border-box; flex: 1; transition: background 0.3s; }
+            .btn-logout:hover { background-color: #707b7c !important; }
+            
+            .designer-credit { text-align: center; font-size: 11px; color: #7f8c8d; margin-top: 10px; font-weight: bold; }
+            .alert { background: #d4edda; color: #155724; padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px; border-right: 4px solid #27ae60; }
+            
+            #map-container { flex-grow: 1; height: 100vh; width: calc(100vw - 440px); position: relative; display: flex; flex-direction: column; }
+            #map { flex-grow: 1; width: 100%; height: 100%; }
 
             .map-settings-box {
                 background: white;
                 padding: 10px;
-                border-radius: 8px;
+                border-radius: 6px;
                 box-shadow: 0 2px 10px rgba(0,0,0,0.2);
                 font-family: Tahoma, sans-serif;
                 font-size: 12px;
-                min-width: 180px;
+                min-width: 200px;
                 z-index: 1000;
             }
             .map-settings-box label {
@@ -566,108 +727,170 @@ def index():
                 font-weight: bold;
                 color: #2c3e50;
             }
-            .map-settings-box input[type="checkbox"] { cursor: pointer; width: 15px; height: 15px; }
+            .map-settings-box input[type="checkbox"] { cursor: pointer; width: 14px; height: 14px; }
 
-            .shape-label {
-                background: #f1c40f !important;
-                border: 2px solid #d35400 !important;
-                padding: 3px 7px;
-                border-radius: 4px;
-                font-size: 11px;
+            .projects-color-table-box {
+                position: absolute;
+                top: 15px;
+                left: 15px;
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 8px;
+                box-shadow: 0 3px 14px rgba(0,0,0,0.2);
+                font-family: Tahoma, sans-serif;
+                font-size: 12px;
+                z-index: 1000;
+                min-width: 220px;
+                overflow: hidden;
+            }
+            .projects-color-header {
+                background: #3498db;
+                color: white;
+                padding: 8px 12px;
                 font-weight: bold;
-                color: #000000 !important;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                font-size: 13px;
+                cursor: pointer;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                user-select: none;
+            }
+            .projects-color-body {
+                padding: 10px 12px;
+                max-height: 300px;
+                overflow-y: auto;
+                transition: max-height 0.3s ease;
+            }
+            .projects-color-body.collapsed {
+                display: none;
+            }
+            .project-color-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 6px;
+                gap: 10px;
+            }
+            .project-color-row span {
+                font-weight: bold;
+                color: #34495e;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                max-width: 140px;
+            }
+            .project-color-row input[type="color"] {
+                border: none;
+                width: 28px;
+                height: 24px;
+                cursor: pointer;
+                background: none;
+                padding: 0;
             }
         </style>
     </head>
     <body>
         <div class="sidebar">
-            <h2>إدارة الإحداثيات</h2>
-            
-            <div class="instructions">
-                • تأكد من وجود عمود باسم (الحي) أو (Neighborhood) في ملف الاكسل ليظهر في التقرير.
-            </div>
+            <div>
+                <h2>إدارة الإحداثيات </h2>
 
-            {% if message %}
-                <div class="alert">{{ message }}</div>
-            {% endif %}
+                {% if message %}
+                    <div class="alert">{{ message }}</div>
+                {% endif %}
 
-            <div class="form-section" style="border: 2px solid #2c3e50; background: #eab30815;">
-                <h3 style="color: #2c3e50;">تصفية المشروع</h3>
-                <div class="form-group">
-                    <label>اختر المشروع:</label>
-                    <select id="projectFilter" onchange="changeProjectLayer()">
-                        <option value="ALL">🌐 كل المشاريع والمناطق</option>
-                        {% for shape in available_shapes %}
-                            <option value="{{ shape.id }}" {% if selected_shape_project == shape.id %}selected{% endif %}>{{ shape.name }}</option>
-                        {% endfor %}
-                    </select>
+                <div class="card-section" style="border: 1px solid #2c3e50;">
+                    <div class="card-header-static" style="color: #2c3e50; background: #eab30815;">تصفية المشروع</div>
+                    <div class="card-body-open">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>اختر المشروع:</label>
+                            <select id="projectFilter" onchange="changeProjectLayer()">
+                                <option value="ALL">🌐 كل المشاريع والمناطق</option>
+                                {% for shape in available_shapes %}
+                                    <option value="{{ shape.id }}" {% if selected_shape_project == shape.id %}selected{% endif %}>{{ shape.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-section" style="border: 1px solid #2980b9;">
+                    <div class="card-header-static" style="color: #2980b9;">🔍 نافذة البحث (رابط / إحداثيات)</div>
+                    <div class="card-body-open">
+                        <form method="POST" style="margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            <div class="form-group">
+                                <label>اسم المشروع:</label>
+                                <input type="text" name="project_name" placeholder="اسم المشروع" value=" ">
+                            </div>
+                            <div class="form-group">
+                                <label>رابط الموقع  :</label>
+                                <input type="text" name="maps_url" placeholder="https://maps.app.goo.gl/..." required>
+                            </div>
+                            <div class="form-group">
+                                <label>ملاحظة:</label>
+                                <input type="text" name="maps_note" placeholder="تفاصيل الموقع...">
+                            </div>
+                            <div class="btn-group">
+                                <button type="submit" name="action" value="search_map_url" style="background-color: #2980b9; flex: 1;">حفظ </button>
+                                <button type="submit" name="action" value="preview_map_url" class="btn-preview" style="flex: 1;">استعراض </button>
+                            </div>
+                        </form>
+
+                        <form method="POST">
+                            <div class="form-group">
+                                <label>اسم المشروع:</label>
+                                <input type="text" name="project_name" placeholder="اسم المشروع" value=" ">
+                            </div>
+                            <div class="form-group" style="display: flex; gap: 8px;">
+                                <div style="flex:1;">
+                                    <label>خط الطول (Lat):</label>
+                                    <input type="text" name="coord_lat" placeholder="24.7136" required>
+                                </div>
+                                <div style="flex:1;">
+                                    <label>خط العرض (Lon):</label>
+                                    <input type="text" name="coord_lon" placeholder="46.6753" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>ملاحظة الموقع:</label>
+                                <input type="text" name="coord_note" placeholder="تفاصيل الإحداثيات..." required>
+                            </div>
+                            <div class="btn-group">
+                                <button type="submit" name="action" value="search_coords_save" style="background-color: #2980b9; flex: 1;">حفظ  </button>
+                                <button type="submit" name="action" value="search_coords_preview" class="btn-preview" style="flex: 1;">استعراض  </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card-section" style="border: 1px solid #e67e22;">
+                    <div class="card-header-static" style="color: #e67e22;">📁 رفع ملف Excel (روابط / إحداثيات)</div>
+                    <div class="card-body-open">
+                        <form id="excelUploadForm" method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="action" value="upload_coords">
+                            
+                            <div id="dropZone" class="drop-zone">
+                                <p>📁 اسحب ملف Excel هنا أو اضغط للاختيار</p>
+                                <input type="file" id="excelFileInput" name="excelFile" accept=".xlsx, .xls, .csv" required style="display: none;">
+                            </div>
+                            <div id="fileNameDisplay" style="font-size: 11px; color: #27ae60; font-weight: bold; margin-bottom: 6px; text-align: center;"></div>
+
+                            <div style="font-size: 11px; color: rgba(231, 76, 60, 0.7); margin-bottom: 8px; text-align: center; line-height: 1.4;">
+                                عند وضع خط الطول والعرض في الجدول تأكد من تسمية الأعمدة بالشكل الصحيح Latitude و Longitude أو Lat و Long
+                            </div>
+
+                            <button type="submit" style="background-color: #27ae60;"> تحميل المواقع على الخريطة  🗺️</button>
+                        </form>
+                    </div>
                 </div>
             </div>
 
-            <div class="form-section" style="border: 2px solid #2980b9; background: #fdfefe;">
-                <h3 style="color: #2980b9;">🗺️ إدخال رابط جوجل لمشروع</h3>
-                <form method="POST">
-                    <div class="form-group">
-                        <label>اسم المشروع / منطقة الإشراف:</label>
-                        <input type="text" name="project_name" placeholder="اسم المشروع" required value="مشروع عام">
-                    </div>
-                    <div class="form-group">
-                        <label>الصق رابط جوجل مابس هنا:</label>
-                        <input type="text" name="maps_url" placeholder="مثال: https://maps.app.goo.gl/..." required>
-                    </div>
-                    <div class="form-group">
-                        <label>ملاحظة:</label>
-                        <input type="text" name="maps_note" placeholder="ملاحظة الموقع">
-                    </div>
-                    <div class="btn-group">
-                        <button type="submit" name="action" value="search_map_url" style="background-color: #2980b9; flex: 1;">حفظ النقطة 📍</button>
-                        <button type="submit" name="action" value="preview_map_url" class="btn-preview" style="flex: 1;">استعراض فقط 🔍</button>
-                    </div>
-                </form>
+            <div>
+                <button type="button" id="downloadReportBtn" class="btn-download">تحميل تقرير الخريطة PDF 📄</button>
+                <div class="actions-bar">
+                    <a href="/clear" class="btn-clear">مسح الخريطة </a>
+                    <a href="/logout" class="btn-logout">تسجيل الخروج </a>
+                </div>
+                <div class="designer-credit"> Designed By Ahmed Saif Alashry </div>
             </div>
-
-            <div class="form-section">
-                <h3>📂 رفع ملف Excel</h3>
-                <form method="POST" enctype="multipart/form-data">
-                    <input type="hidden" name="action" value="upload">
-                    <div class="form-group">
-                        <input type="file" name="excelFile" accept=".xlsx, .xls, .csv" required>
-                    </div>
-                    <button type="submit">استخراج وعرض المواقع</button>
-                </form>
-            </div>
-
-            <div class="form-section">
-                <h3>➕ إضافة يدوية (بالإحداثيات)</h3>
-                <form method="POST">
-                    <input type="hidden" name="action" value="add_point">
-                    <div class="form-group">
-                        <label>اسم المشروع:</label>
-                        <input type="text" name="project_name" placeholder="اسم المشروع" required value="مشروع عام">
-                    </div>
-                    <div class="form-group">
-                        <label>خط الطول (Lat):</label>
-                        <input type="text" name="new_lat" placeholder="مثال: 24.7136" required>
-                    </div>
-                    <div class="form-group">
-                        <label>خط العرض (Lon):</label>
-                        <input type="text" name="new_lon" placeholder="مثال: 46.6753" required>
-                    </div>
-                    <div class="form-group">
-                        <label>ملاحظة:</label>
-                        <input type="text" name="new_note" placeholder="اكتب تفاصيل الموقع..." required>
-                    </div>
-                    <button type="submit">إضافة النقطة بالإحداثيات</button>
-                </form>
-            </div>
-
-            <button type="button" id="downloadReportBtn" class="btn-download">تحميل تقرير الخريطة PDF 📄</button>
-
-            <a href="/clear" class="btn-clear">مسح الخريطة وتفريغ البيانات 🗑️</a>
-            <a href="/logout" class="btn-logout">تسجيل الخروج 🔒</a>
-            
-            <div class="designer-credit"> Designed By Ahmed Saif Alashry </div>
         </div>
         
         <div id="map-container">
@@ -676,6 +899,11 @@ def index():
 
         <script>
             var map = L.map('map').setView([24.7136, 46.6753], 12);
+
+            var streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                crossOrigin: true
+            }).addTo(map);
 
             var satelliteBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 attribution: 'Tiles © Esri',
@@ -689,21 +917,56 @@ def index():
                 crossOrigin: true
             });
 
-            var satelliteHybrid = L.layerGroup([satelliteBase, hybridLabels]).addTo(map);
-
-            var streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap',
-                crossOrigin: true
-            });
+            var satelliteHybrid = L.layerGroup([satelliteBase, hybridLabels]);
 
             L.control.layers({
-                "قمر صناعي مع أسماء الأحياء (Hybrid)": satelliteHybrid,
-                "خريطة الشوارع العادية": streetLayer
+                "خريطة الشوارع العادية (الأساسية)": streetLayer,
+                "قمر صناعي مع أسماء الأحياء (Hybrid)": satelliteHybrid
             }).addTo(map);
 
             setTimeout(function() {
                 map.invalidateSize();
             }, 500);
+
+            var dropZone = document.getElementById('dropZone');
+            var fileInput = document.getElementById('excelFileInput');
+            var fileNameDisplay = document.getElementById('fileNameDisplay');
+            var excelUploadForm = document.getElementById('excelUploadForm');
+
+            dropZone.addEventListener('click', function() {
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', function(e) {
+                if (fileInput.files.length > 0) {
+                    fileNameDisplay.innerText = "الملف المختار: " + fileInput.files[0].name;
+                }
+            });
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.add('dragover');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropZone.classList.remove('dragover');
+                }, false);
+            });
+
+            dropZone.addEventListener('drop', function(e) {
+                var dt = e.dataTransfer;
+                var files = dt.files;
+                if (files.length > 0) {
+                    fileInput.files = files;
+                    fileNameDisplay.innerText = "الملف المختار: " + files[0].name;
+                }
+            }, false);
 
             function changeProjectLayer() {
                 var selectedVal = document.getElementById('projectFilter').value;
@@ -711,41 +974,91 @@ def index():
             }
 
             var shapeGeojson = {{ shape_geojson | tojson | safe }};
+            var availableShapes = {{ available_shapes | tojson | safe }};
             var shapeLayer = null;
+            
+            var shapeLabelsGroup = L.layerGroup();
+            var shapeFeatureLayers = [];
+
+            var layerCustomColors = JSON.parse(localStorage.getItem('layerCustomColors') || '{}');
+            var defaultColorsList = ['#e74c3c', '#3498db', '#27ae60', '#e67e22', '#8e44ad', '#16a085', '#d35400', '#2c3e50'];
+            var layerColorMap = {};
+
+            var allProjectsList = [];
+            availableShapes.forEach(function(s) {
+                if (!allProjectsList.includes(s.name)) {
+                    allProjectsList.push(s.name);
+                }
+            });
+
+            if (shapeGeojson && shapeGeojson.features) {
+                shapeGeojson.features.forEach(function(feat) {
+                    var pName = feat.properties.parent_project_name || ' ';
+                    if (!allProjectsList.includes(pName)) {
+                        allProjectsList.push(pName);
+                    }
+                });
+            }
+
+            allProjectsList.forEach(function(proj, index) {
+                if (layerCustomColors[proj]) {
+                    layerColorMap[proj] = layerCustomColors[proj];
+                } else {
+                    layerColorMap[proj] = defaultColorsList[index % defaultColorsList.length];
+                }
+            });
+
             if (shapeGeojson) {
                 shapeLayer = L.geoJSON(shapeGeojson, {
                     style: function (feature) {
+                        var pName = feature.properties ? (feature.properties.parent_project_name || ' ') : ' ';
+                        var col = layerColorMap[pName] || '#e74c3c';
                         return {
-                            color: "#e74c3c",
+                            color: col,
                             weight: 3,
-                            fillColor: "#3498db",
+                            fillColor: col,
                             fillOpacity: 0.3
                         };
                     },
                     onEachFeature: function (feature, layer) {
-                        if (feature.properties) {
-                            var propText = "<div style='font-family: Tahoma;'><b>بيانات منطقة الإشراف:</b><br>";
-                            for (var key in feature.properties) {
-                                propText += "<b>" + key + ":</b> " + feature.properties[key] + "<br>";
-                            }
-                            propText += "</div>";
-                            layer.bindPopup(propText);
+                        var pName = feature.properties ? (feature.properties.parent_project_name || ' ') : ' ';
+                        shapeFeatureLayers.push({
+                            layer: layer,
+                            project: pName
+                        });
 
-                            var displayName = feature.properties.Round_ID || feature.properties.ROUND_ID || feature.properties.round_id || feature.properties.Name || feature.properties.NAME || feature.properties.name || feature.properties.Title || feature.properties.TITLE || feature.properties.title || feature.properties.ID || Object.values(feature.properties)[0];
-                            if (displayName) {
-                                layer.bindTooltip(String(displayName), {
-                                    permanent: true,
-                                    direction: 'center',
-                                    className: 'shape-label'
+                        if (feature.properties) {
+                            var parentProject = pName;
+                            var roundIdName = feature.properties.Round_ID || feature.properties.ROUND_ID || feature.properties.round_id || feature.properties.Name || feature.properties.NAME || feature.properties.name || feature.properties.Title || feature.properties.TITLE || feature.properties.title || feature.properties.ID || Object.values(feature.properties)[0] || '-';
+
+                            try {
+                                var center = layer.getBounds().getCenter();
+                                var textMarker = L.marker(center, {
+                                    icon: L.divIcon({
+                                        className: 'shape-text-label',
+                                        html: `<div style="background: rgba(255, 255, 255, 0.9); padding: 2px 6px; border: 1px solid #e74c3c; border-radius: 4px; font-size: 11px; font-weight: bold; color: #c0392b; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">${roundIdName}</div>`,
+                                        iconSize: [60, 20],
+                                        iconAnchor: [30, 10]
+                                    })
                                 });
+                                shapeLabelsGroup.addLayer(textMarker);
+                            } catch(e) {}
+
+                            var propText = `<div style='font-family: Tahoma; min-width: 180px;'>` +
+                                           `<b style='color: #2c3e50; font-size: 13px; border-bottom: 2px solid #3498db; display: block; padding-bottom: 3px; margin-bottom: 5px;'>بيانات منطقة الإشراف</b>` +
+                                           `<div style='margin-bottom: 4px; font-size: 12px;'>اسم المشروع التابع: <b>${parentProject}</b></div>` +
+                                           `<div style='margin-bottom: 4px; font-size: 12px;'>منطقة الإشراف: <b style='color: #e74c3c;'>${roundIdName}</b></div>`;
+
+                            for (var key in feature.properties) {
+                                if (key !== 'parent_project_name' && key !== 'Round_ID' && key !== 'ROUND_ID' && key !== 'round_id' && key !== 'Name' && key !== 'NAME' && key !== 'name' && key !== 'Title' && key !== 'TITLE' && key !== 'title' && key !== 'ID') {
+                                    propText += `<div style='font-size: 11px; color: #555;'><b>${key}:</b> ${feature.properties[key]}</div>`;
+                                }
                             }
+                            propText += `</div>`;
+                            layer.bindPopup(propText);
                         }
                     }
                 }).addTo(map);
-
-                try {
-                    map.fitBounds(shapeLayer.getBounds());
-                } catch(e) {}
             }
 
             var groupedLocations = {{ grouped_locations | tojson | safe }};
@@ -755,44 +1068,58 @@ def index():
             var allMarkersData = [];
             var currentMarkersGroup = L.layerGroup().addTo(map);
 
-            function createPinIcon(color, count) {
+            function createPinIcon(count) {
                 var badgeHtml = '';
                 if (count > 1) {
-                    badgeHtml = `<div style="position: absolute; top: -3px; right: -5px; background: #e74c3c; color: white; border-radius: 50%; min-width: 20px; height: 20px; padding: 0 4px; font-size: 11px; font-weight: bold; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">${count}</div>`;
+                    badgeHtml = `<div style="position: absolute; top: -2px; right: -4px; background: #e74c3c; color: white; border-radius: 50%; min-width: 16px; height: 16px; padding: 0 3px; font-size: 9px; font-weight: bold; display: flex; align-items: center; justify-content: center; border: 1.5px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">${count}</div>`;
                 }
                 return L.divIcon({
                     className: 'custom-pin',
-                    html: `<div style="position: relative; width: 36px; height: 42px; filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.4));">
-                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" width="36" height="42">
-                               <path fill="${color}" d="M172.2 501.4C27 291 0 269.4 0 192 0 86 86 0 192 0s192 86 192 192c0 77.4-27 99-172.2 309.4-7.8 11.2-23.9 11.2-31.6 0z"/>
+                    html: `<div style="position: relative; width: 24px; height: 30px; filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.4));">
+                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" width="24" height="30">
+                               <path fill="#8e44ad" d="M172.2 501.4C27 291 0 269.4 0 192 0 86 86 0 192 0s192 86 192 192c0 77.4-27 99-172.2 309.4-7.8 11.2-23.9 11.2-31.6 0z"/>
                                <circle cx="192" cy="192" r="75" fill="#ffffff" />
-                               <path fill="${color}" d="M192 130a50 50 0 1 0 0 100 50 50 0 1 0 0-100z"/>
+                               <path fill="#8e44ad" d="M192 130a50 50 0 1 0 0 100 50 50 0 1 0 0-100z"/>
                              </svg>
                              ${badgeHtml}
                            </div>`,
-                    iconSize: [36, 42],
-                    iconAnchor: [18, 42],
-                    popupAnchor: [0, -38]
+                    iconSize: [24, 30],
+                    iconAnchor: [12, 30],
+                    popupAnchor: [0, -28]
                 });
             }
 
             groupedLocations.forEach(function(group) {
                 var primaryNote = group.items[0].note;
-                var popupHtml = `<div style="text-align: right; font-family: Tahoma; min-width: 200px; max-height: 250px; overflow-y: auto;">` +
-                                `<b style="color: #2980b9; font-size: 12px; display: block;">المشروع: ${group.project}</b>` +
-                                `<b style="color: #2c3e50; font-size: 13px; display: block; margin-bottom: 5px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">إجمالي البلاغات هنا (${group.count}):</b>`;
+                
+                var popupHtml = `<div style="text-align: right; font-family: Tahoma; min-width: 250px; max-height: 300px; overflow-y: auto;">` +
+                                `<b style="color: #2980b9; font-size: 13px; display: block; border-bottom: 2px solid #2980b9; padding-bottom: 4px; margin-bottom: 6px;">📁 المشروع: ${group.project}</b>` +
+                                `<div style="font-size: 11px; color: #34495e; margin-bottom: 4px;">خط الطول (Lat): <b>${group.lat.toFixed(5)}</b></div>` +
+                                `<div style="font-size: 11px; color: #34495e; margin-bottom: 8px;">خط العرض (Lon): <b>${group.lon.toFixed(5)}</b></div>`;
 
                 group.items.forEach(function(item, idx) {
-                    popupHtml += `<div style="margin-bottom: 8px; padding-bottom: 6px; ${idx < group.items.length - 1 ? 'border-bottom: 1px dashed #eee;' : ''}">` +
-                                 `<span style="color: #e74c3c; font-weight: bold;">#${idx+1}</span> <b>${item.note}</b><br>` +
-                                 `<span style="color: #16a085; font-size: 11px;">الحي: <b>${item.neighborhood || '-'}</b> | منطقة الإشراف: <b>${item.round_id || '-'}</b></span><br>` +
-                                 (item.url !== '#' ? `<a href='${item.url}' target='_blank' style='background:#27ae60; color:white; padding:3px 8px; font-size:11px; text-decoration:none; border-radius:3px; display:inline-block; margin-top:3px; font-weight:bold;'>فتح الموقع ↗</a>` : '') +
-                                 `</div>`;
+                    popupHtml += `<div style="background: #f8f9fa; padding: 6px; border-radius: 5px; margin-bottom: 6px; border: 1px solid #e1e1e1;">` +
+                                 `<div style="color: #e74c3c; font-weight: bold; font-size: 11px;"> / النقطة #${idx+1}</div>` +
+                                 `<div style="margin: 3px 0; color: #2c3e50;"><b>الملاحظة:</b> ${item.note}</div>` +
+                                 `<div style="color: #16a085; font-size: 11px; margin-bottom: 3px;">منطقة الإشراف: <b>${item.round_id || '-'}</b></div>`;
+                    
+                    if (item.extra_details) {
+                        for (var key in item.extra_details) {
+                            if (item.extra_details.hasOwnProperty(key)) {
+                                popupHtml += `<div style="font-size: 11px; color: #34495e; border-top: 1px dashed #dcdde1; padding-top: 2px; margin-top: 2px;"><b>${key}:</b> ${item.extra_details[key]}</div>`;
+                            }
+                        }
+                    }
+
+                    if (item.url !== '#' && item.url !== '') {
+                        popupHtml += `<a href='${item.url}' target='_blank' style='background:#27ae60; color:white; padding:2px 6px; font-size:10px; text-decoration:none; border-radius:3px; display:inline-block; margin-top:4px; font-weight:bold;'>فتح رابط جوجل ↗</a>`;
+                    }
+                    popupHtml += `</div>`;
                 });
                 popupHtml += `</div>`;
 
                 var marker = L.marker([group.lat, group.lon], {
-                    icon: createPinIcon('#2980b9', group.count)
+                    icon: createPinIcon(group.count)
                 });
 
                 marker.bindPopup(popupHtml);
@@ -814,30 +1141,29 @@ def index():
 
             document.getElementById('downloadReportBtn').addEventListener('click', function() {
                 var btn = this;
-                btn.innerText = "جاري تجهيز الخريطة والطبقات... ⏳";
+                btn.innerText = "جاري تجهيز الخريطة والتقرير... ⏳";
                 btn.style.opacity = "0.7";
 
-                var wasSatellite = map.hasLayer(satelliteHybrid);
-                if (wasSatellite) {
-                    map.removeLayer(satelliteHybrid);
-                    map.addLayer(streetLayer);
-                }
+                var mapElement = document.getElementById('map');
+                var originalWidth = mapElement.style.width;
+                var originalHeight = mapElement.style.height;
+                
+                mapElement.style.width = '1200px';
+                mapElement.style.height = '700px';
+                map.invalidateSize();
 
                 setTimeout(function() {
-                    var mapElement = document.getElementById('map');
-
                     html2canvas(mapElement, {
                         useCORS: true,
                         allowTaint: false,
-                        scale: 1.5,
+                        scale: 2,
                         logging: false
                     }).then(function(canvas) {
+                        mapElement.style.width = originalWidth;
+                        mapElement.style.height = originalHeight;
+                        map.invalidateSize();
+
                         var mapImgUrl = canvas.toDataURL('image/png');
-                        
-                        if (wasSatellite) {
-                            map.removeLayer(streetLayer);
-                            map.addLayer(satelliteHybrid);
-                        }
 
                         var projSelect = document.getElementById('projectFilter');
                         var selectedProjName = projSelect.options[projSelect.selectedIndex].text.replace(/[🌐]/g, '').trim();
@@ -851,6 +1177,20 @@ def index():
                         var fileTimeStr = String(now.getHours()).padStart(2, '0') + '-' + String(now.getMinutes()).padStart(2, '0');
                         var fileName = `تقرير_${selectedProjName}_${fileDateStr}_${fileTimeStr}.pdf`;
 
+                        // جمع كافة الأعمدة الديناميكية الفريدة من جميع العناصر لإنشاء جدول شامل
+                        var allDynamicKeys = [];
+                        allMarkersData.forEach(function(data) {
+                            data.items.forEach(function(item) {
+                                if (item.extra_details) {
+                                    Object.keys(item.extra_details).forEach(function(k) {
+                                        if (!allDynamicKeys.includes(k)) {
+                                            allDynamicKeys.push(k);
+                                        }
+                                    });
+                                }
+                            });
+                        });
+
                         var allFlatItems = [];
                         allMarkersData.forEach(function(data) {
                             data.items.forEach(function(item) {
@@ -860,47 +1200,58 @@ def index():
                                     round_id: item.round_id || '-',
                                     note: item.note,
                                     url: item.url,
-                                    neighborhood: item.neighborhood || '-'
+                                    project: data.project,
+                                    extra_details: item.extra_details || {}
                                 });
                             });
                         });
 
-                        allFlatItems.sort(function(a, b) {
-                            var rA = String(a.round_id).toLowerCase();
-                            var rB = String(b.round_id).toLowerCase();
-                            if (rA < rB) return -1;
-                            if (rA > rB) return 1;
-                            return 0;
-                        });
-
-                        var htmlContent = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير الخريطة والبلاغات</title><style>
-                            body { font-family: Tahoma, sans-serif; padding: 15px; background: #fff; color: #333; }
-                            h1 { text-align: center; color: #2c3e50; font-size: 17px; margin-bottom: 5px; }
-                            .report-meta { text-align: center; color: #7f8c8d; font-size: 12px; margin-bottom: 15px; direction: ltr; unicode-bidi: embed; }
-                            .map-img { width: 100%; max-height: 380px; object-fit: contain; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 15px; }
-                            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                            th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; font-size: 11px; }
+                        var htmlContent = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير الخريطة والبيانات</title><style>
+                            body { font-family: Tahoma, sans-serif; padding: 10px; background: #fff; color: #333; }
+                            h1 { text-align: center; color: #2c3e50; font-size: 16px; margin-bottom: 3px; }
+                            .report-meta { text-align: center; color: #7f8c8d; font-size: 11px; margin-bottom: 10px; direction: ltr; unicode-bidi: embed; }
+                            .map-container-pdf { width: 100%; text-align: center; margin-bottom: 10px; }
+                            .map-img { width: 100%; max-height: 480px; object-fit: contain; border: 1px solid #ccc; border-radius: 4px; }
+                            table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+                            th, td { border: 1px solid #ddd; padding: 5px 8px; text-align: right; font-size: 10px; }
                             th { background-color: #2c3e50; color: white; }
                             tr:nth-child(even) { background-color: #f9f9f9; }
                         </style></head><body>
-                        <h1>تقرير خريطة وبلاغات المشروع: <span dir="ltr" style="unicode-bidi: embed;">${selectedProjName}</span></h1>
+                        <h1>التقرير   : <span dir="ltr" style="unicode-bidi: embed;">${selectedProjName}</span></h1>
                         <div class="report-meta">${dateTimeFullStr}</div>
-                        <img src="${mapImgUrl}" class="map-img">
-                        <h2>تفاصيل البلاغات والمواقع </h2>
+                        <div class="map-container-pdf"><img src="${mapImgUrl}" class="map-img"></div>
+                        <h2 style="font-size: 13px; margin: 10px 0 5px 0; color: #2c3e50;">جدول تفاصيل البيانات والمواقع</h2>
                         <table>
-                            <thead><tr><th>م</th><th>المشروع</th><th>الحي</th><th>منطقة الإشراف</th><th>ملاحظة</th><th>رابط الموقع</th><th>الإحداثيات</th></tr></thead><tbody>`;
+                            <thead><tr>
+                                <th>م</th>
+                                <th>المشروع</th>
+                                <th>ملاحظة</th>
+                                <th>خط الطول (Lat)</th>
+                                <th>خط العرض (Lon)</th>
+                                <th>منطقة الإشراف</th>`;
+                        
+                        allDynamicKeys.forEach(function(key) {
+                            htmlContent += `<th>${key}</th>`;
+                        });
+
+                        htmlContent += `</tr></thead><tbody>`;
 
                         var counter = 1;
                         allFlatItems.forEach(function(item) {
                             htmlContent += `<tr>
                                 <td>${counter++}</td>
-                                <td><b>${selectedProjName}</b></td>
-                                <td><span style="color: #c0392b; font-weight: bold;">${item.neighborhood}</span></td>
-                                <td><span style="color: #2980b9; font-weight: bold;">${item.round_id}</span></td>
+                                <td><b>${item.project}</b></td>
                                 <td>${item.note}</td>
-                                <td>${item.url !== '#' ? '<a href="' + item.url + '" target="_blank">فتح ↗</a>' : '-'}</td>
-                                <td>${item.lat.toFixed(4)}, ${item.lon.toFixed(4)}</td>
-                            </tr>`;
+                                <td>${item.lat.toFixed(5)}</td>
+                                <td>${item.lon.toFixed(5)}</td>
+                                <td><span style="color: #2980b9; font-weight: bold;">${item.round_id}</span></td>`;
+                            
+                            allDynamicKeys.forEach(function(key) {
+                                var val = item.extra_details[key] !== undefined ? item.extra_details[key] : '-';
+                                htmlContent += `<td>${val}</td>`;
+                            });
+
+                            htmlContent += `</tr>`;
                         });
 
                         htmlContent += `</tbody></table></body></html>`;
@@ -911,9 +1262,9 @@ def index():
                         var opt = {
                             margin:       5,
                             filename:     fileName,
-                            image:        { type: 'jpeg', quality: 0.90 },
-                            html2canvas:  { scale: 1.5, useCORS: true, logging: false },
-                            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                            image:        { type: 'jpeg', quality: 0.92 },
+                            html2canvas:  { scale: 2, useCORS: true, logging: false },
+                            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
                         };
 
                         html2pdf().from(element).set(opt).save().then(function() {
@@ -921,22 +1272,24 @@ def index():
                             btn.style.opacity = "1";
                         });
                     }).catch(function(err) {
-                        if (wasSatellite) {
-                            map.removeLayer(streetLayer);
-                            map.addLayer(satelliteHybrid);
-                        }
+                        mapElement.style.width = originalWidth;
+                        mapElement.style.height = originalHeight;
+                        map.invalidateSize();
                         alert('حدث خطأ أثناء أخذ لقطة الشاشة للخريطة.');
                         btn.innerText = "تحميل تقرير الخريطة PDF 📄";
                         btn.style.opacity = "1";
                     });
-                }, 1500);
+                }, 800);
             });
 
             var SettingsControl = L.Control.extend({
                 options: { position: 'topright' },
                 onAdd: function (map) {
                     var container = L.DomUtil.create('div', 'map-settings-box');
-                    container.innerHTML = `<label><input type="checkbox" id="chkNotes"> إظهار الملاحظات</label>`;
+                    container.innerHTML = `<label><input type="checkbox" id="chkNotes"> إظهار الملاحظات</label>` +
+                                          `<label><input type="checkbox" id="chkShowSupervision" checked> إظهار مناطق الإشراف</label>` +
+                                          `<label><input type="checkbox" id="chkHideSupervision"> إخفاء مناطق الإشراف</label>` +
+                                          `<label><input type="checkbox" id="chkShowSupNames"> إظهار أسامي مناطق الإشراف</label>`;
                     L.DomEvent.disableClickPropagation(container);
                     setTimeout(function() {
                         document.getElementById('chkNotes').addEventListener('change', function(e) {
@@ -946,15 +1299,125 @@ def index():
                                 else { item.marker.unbindTooltip(); item.marker.bindTooltip(item.tooltipText, { permanent: false, direction: 'top' }); }
                             });
                         });
+
+                        var chkShowSup = document.getElementById('chkShowSupervision');
+                        var chkHideSup = document.getElementById('chkHideSupervision');
+                        var chkShowSupNames = document.getElementById('chkShowSupNames');
+
+                        chkShowSup.addEventListener('change', function(e) {
+                            if (e.target.checked) {
+                                chkHideSup.checked = false;
+                                if (shapeLayer && !map.hasLayer(shapeLayer)) map.addLayer(shapeLayer);
+                                if (chkShowSupNames.checked && shapeLabelsGroup && !map.hasLayer(shapeLabelsGroup)) map.addLayer(shapeLabelsGroup);
+                            } else {
+                                if (!chkHideSup.checked) chkHideSup.checked = true;
+                                if (shapeLayer && map.hasLayer(shapeLayer)) map.removeLayer(shapeLayer);
+                                if (map.hasLayer(shapeLabelsGroup)) map.removeLayer(shapeLabelsGroup);
+                            }
+                        });
+
+                        chkHideSup.addEventListener('change', function(e) {
+                            if (e.target.checked) {
+                                chkShowSup.checked = false;
+                                if (shapeLayer && map.hasLayer(shapeLayer)) map.removeLayer(shapeLayer);
+                                if (map.hasLayer(shapeLabelsGroup)) map.removeLayer(shapeLabelsGroup);
+                            } else {
+                                if (!chkShowSup.checked) chkShowSup.checked = true;
+                                if (shapeLayer && !map.hasLayer(shapeLayer)) map.addLayer(shapeLayer);
+                                if (chkShowSupNames.checked && shapeLabelsGroup && !map.hasLayer(shapeLabelsGroup)) map.addLayer(shapeLabelsGroup);
+                            }
+                        });
+
+                        chkShowSupNames.addEventListener('change', function(e) {
+                            var showNames = e.target.checked;
+                            if (showNames) {
+                                if (chkShowSup.checked && shapeLabelsGroup && !map.hasLayer(shapeLabelsGroup)) {
+                                    map.addLayer(shapeLabelsGroup);
+                                }
+                            } else {
+                                if (shapeLabelsGroup && map.hasLayer(shapeLabelsGroup)) {
+                                    map.removeLayer(shapeLabelsGroup);
+                                }
+                            }
+                        });
                     }, 100);
                     return container;
                 }
             });
             map.addControl(new SettingsControl());
 
+            var ProjectsColorControl = L.Control.extend({
+                options: { position: 'topleft' },
+                onAdd: function (map) {
+                    var container = L.DomUtil.create('div', 'projects-color-table-box');
+                    var html = `<div class="projects-color-header" id="projectsHeaderToggle">
+                                    <span> layers Colors   </span>
+                                    <span id="toggleIcon">▼</span>
+                                </div>
+                                <div class="projects-color-body" id="projectsBodyContent">`;
+                    
+                    if (allProjectsList.length === 0) {
+                        html += `<div style="text-align: center; color: #7f8c8d; font-size: 11px;">لا توجد مشاريع متاحة</div>`;
+                    } else {
+                        allProjectsList.forEach(function(proj) {
+                            var currentColor = layerColorMap[proj] || '#e74c3c';
+                            html += `<div class="project-color-row">` +
+                                    `<span title="${proj}">${proj}</span>` +
+                                    `<input type="color" class="layer-color-picker" data-project="${proj}" value="${currentColor}">` +
+                                    `</div>`;
+                        });
+                    }
+                    html += `</div>`;
+                    
+                    container.innerHTML = html;
+                    L.DomEvent.disableClickPropagation(container);
+                    L.DomEvent.disableScrollPropagation(container);
+
+                    setTimeout(function() {
+                        var headerToggle = document.getElementById('projectsHeaderToggle');
+                        var bodyContent = document.getElementById('projectsBodyContent');
+                        var toggleIcon = document.getElementById('toggleIcon');
+
+                        headerToggle.addEventListener('click', function(e) {
+                            bodyContent.classList.toggle('collapsed');
+                            if (bodyContent.classList.contains('collapsed')) {
+                                toggleIcon.innerText = '▲';
+                            } else {
+                                toggleIcon.innerText = '▼';
+                            }
+                        });
+
+                        var pickers = container.querySelectorAll('.layer-color-picker');
+                        pickers.forEach(function(picker) {
+                            picker.addEventListener('input', function(e) {
+                                var projName = e.target.getAttribute('data-project');
+                                var newColor = e.target.value;
+                                
+                                layerColorMap[projName] = newColor;
+                                layerCustomColors[projName] = newColor;
+                                
+                                localStorage.setItem('layerCustomColors', JSON.stringify(layerCustomColors));
+
+                                shapeFeatureLayers.forEach(function(item) {
+                                    if (item.project === projName) {
+                                        item.layer.setStyle({
+                                            color: newColor,
+                                            fillColor: newColor
+                                        });
+                                    }
+                                });
+                            });
+                        });
+                    }, 100);
+
+                    return container;
+                }
+            });
+            map.addControl(new ProjectsColorControl());
+
             if (searchTarget) {
                 map.setView([searchTarget.lat, searchTarget.lon], 17);
-                L.marker([searchTarget.lat, searchTarget.lon], { icon: createPinIcon('#e74c3c', 1) }).addTo(map).bindPopup(searchTarget.note).openPopup();
+                L.marker([searchTarget.lat, searchTarget.lon], { icon: createPinIcon(1) }).addTo(map).bindPopup(searchTarget.note).openPopup();
             } else if (shapeLayer) {
                 try {
                     map.fitBounds(shapeLayer.getBounds());
@@ -969,7 +1432,6 @@ def index():
   return render_template_string(
       html_template,
       grouped_locations=grouped_locations,
-      projects_set=projects_set,
       available_shapes=available_shapes,
       shape_geojson=shape_geojson,
       selected_shape_project=selected_shape_project,
@@ -978,8 +1440,6 @@ def index():
       search_target=search_target,
   )
 
-
-import os
 
 if __name__ == '__main__':
   port = int(os.environ.get('PORT', 5000))

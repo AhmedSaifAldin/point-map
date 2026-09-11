@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>نظام إدارة ومتابعة المواقع والمشاريع</title>
+    <!-- استيراد خط Cairo العصري من جوجل -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <style>
+        /* تطبيق خط Cairo على كامل النظام مع الحفاظ على التمرير والسكرول */
+        html, body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Cairo', sans-serif !important; 
+            height: 100vh; 
+            width: 100vw; 
+            overflow: hidden; 
+            display: flex; 
+            background: #f4f7f6; 
+        }
+        
+        /* باقي التنسيقات للقائمة الجانبية والكروت كما هي مع التمرير السلس */
+        .sidebar { 
+            width: 440px; 
+            height: 100vh; 
+            background: #fff; 
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1); 
+            padding: 15px; 
+            box-sizing: border-box; 
+            z-index: 1000; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: space-between; 
+            overflow-y: auto; 
+        }
+        
+        h2 { color: #2c3e50; font-size: 18px; margin: 0 0 12px 0; text-align: center; font-weight: 700; }
+        
+        .card-section { background: #fdfdfd; border-radius: 8px; margin-bottom: 12px; border: 1px solid #dcdde1; box-shadow: 0 2px 5px rgba(0,0,0,0.03); overflow: hidden; }
+        .card-header-static { padding: 10px 12px; background: #f1f2f6; display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 13px; color: #34495e; border-bottom: 1px solid #dcdde1; }
+        .card-body-open { padding: 12px; background: #fff; }
+
+        .form-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 12px; color: #34495e; }
+        input[type="text"], select, input[type="file"] { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 6px; box-sizing: border-box; font-size: 13px; background: #fff; font-family: 'Cairo', sans-serif; }
+        
+        button { background-color: #27ae60; color: white; border: none; padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; width: 100%; font-weight: 700; font-family: 'Cairo', sans-serif; transition: background 0.3s; margin-top: 5px; }
+        button:hover { background-color: #219653; }
+        .btn-group { display: flex; gap: 8px; margin-top: 5px; }
+        .btn-preview { background-color: #e67e22 !important; }
+        .btn-preview:hover { background-color: #d35400 !important; }
+        .btn-download { background-color: #2980b9 !important; padding: 10px; font-size: 13px; margin-top: 10px; font-family: 'Cairo', sans-serif; font-weight: 700; }
+        .btn-download:hover { background-color: #1f618d !important; }
+        
+        .actions-bar { display: flex; gap: 8px; margin-top: 8px; }
+        .btn-clear { background-color: #e74c3c !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: 700; font-size: 13px; box-sizing: border-box; flex: 1; transition: background 0.3s; }
+        .btn-clear:hover { background-color: #c0392b !important; }
+        .btn-logout { background-color: #7f8c8d !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: 700; font-size: 13px; box-sizing: border-box; flex: 1; transition: background 0.3s; }
+        .btn-logout:hover { background-color: #707b7c !important; }
+        
+        .designer-credit { text-align: center; font-size: 11px; color: #7f8c8d; margin-top: 10px; font-weight: 700; }
+        .alert { background: #d4edda; color: #155724; padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px; border-right: 4px solid #27ae60; font-weight: 600; }
+        
+        #map-container { flex-grow: 1; height: 100vh; width: calc(100vw - 440px); position: relative; display: flex; flex-direction: column; }
+        #map { flex-grow: 1; width: 100%; height: 100%; }
+
+        .map-settings-box {
+            background: white;
+            padding: 10px;
+            border-radius: 6px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            font-family: 'Cairo', sans-serif;
+            font-size: 12px;
+            min-width: 200px;
+            z-index: 1000;
+        }
+        .map-settings-box label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        .map-settings-box input[type="checkbox"] { cursor: pointer; width: 14px; height: 14px; }
+    </style>
+</head>س
+<body>
+    <div class="sidebar">
+        <h2>إدارة الإحداثيات والبيانات</h2>
+
+        {% if message %}
+            <div class="alert">{{ message }}</div>
+        {% endif %}
+
+        <div class="form-section" style="border: 2px solid #2c3e50; background: #eab30815;">
+            <h3 style="color: #2c3e50;">تصفية المشروع</h3>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>اختر المشروع:</label>
+                <select id="projectFilter" onchange="changeProjectLayer()">
+                    <option value="ALL">🌐 كل المشاريع والمناطق</option>
+                    {% for shape in available_shapes %}
+                        <option value="{{ shape.id }}" {% if selected_shape_project == shape.id %}selected{% endif %}>{{ shape.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <h3>📍 إضافة نقطة يدوية</h3>
+            <form method="POST">
+                <input type="hidden" name="action" value="add_point">
+                <div class="form-group">
+                    <label>اسم المشروع:</label>
+                    <input type="text" name="project_name" placeholder="اسم المشروع" required value="مشروع تجريبي">
+                </div>
+                <div class="form-group">
+                    <label>خط الطول (Lat):</label>
+                    <input type="text" name="new_lat" placeholder="مثال: 24.7136" required>
+                </div>
+                <div class="form-group">
+                    <label>خط العرض (Lon):</label>
+                    <input type="text" name="new_lon" placeholder="مثال: 46.6753" required>
+                </div>
+                <div class="form-group">
+                    <label>الملاحظات:</label>
+                    <input type="text" name="new_note" placeholder="اكتب الملاحظات..." required>
+                </div>
+                <button type="submit" style="margin-top:0;">إضافة النقطة مباشرة</button>
+            </form>
+        </div>
+
+        <div class="form-section" style="background: #fff; border: 2px solid #27ae60;">
+            <h3 style="color: #27ae60;">📥 إنسرت كشوف الاكسل</h3>
+            <form method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="upload_coords">
+                <div class="form-group">
+                    <label>ملف كشف الإحداثيات (Excel / CSV):</label>
+                    <input type="file" name="excelFile" accept=".xlsx, .xls, .csv" required>
+                </div>
+                <button type="submit" style="background-color: #27ae60; margin-top: 0;">رفع واستيراد البيانات 🗺️</button>
+            </form>
+        </div>
+
+        <button type="button" id="downloadReportBtn" class="btn-download">تحميل تقرير الخريطة PDF 📄</button>
+        <a href="/clear" class="btn-clear">مسح الخريطة وتفريغ البيانات 🗑️</a>
+        
+        <div class="designer-credit"> Designed By Ahmed Saif Alashry </div>
+    </div>
+    
+    <div id="map-container">
+        <div id="map"></div>
+    </div>
+
+    <div id="server-data" 
+         data-shape='{{ shape_geojson | tojson | safe if shape_geojson else "" }}'
+         data-locations='{{ grouped_locations | tojson | safe if grouped_locations else "[]" }}'
+         style="display: none;">
+    </div>
+
+    <script>
+        var map = L.map('map').setView([24.7136, 46.6753], 12);
+
+        var satelliteBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles © Esri',
+            maxZoom: 19
+        });
+        var streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        L.control.layers({
+            "خريطة الشوارع العادية": streetLayer,
+            "قمر صناعي": satelliteBase
+        }).addTo(map);
+
+        function changeProjectLayer() {
+            var selectedVal = document.getElementById('projectFilter').value;
+            window.location.href = "/?shape_proj=" + encodeURIComponent(selectedVal);
+        }
+
+        var serverDataEl = document.getElementById('server-data');
+        var groupedLocations = JSON.parse(serverDataEl.getAttribute('data-locations') || '[]');
+        var shapeGeojson = serverDataEl.getAttribute('data-shape') ? JSON.parse(serverDataEl.getAttribute('data-shape')) : null;
+
+        var allMarkersData = [];
+        var currentMarkersGroup = L.layerGroup().addTo(map);
+        var shapeLayer = null;
+        var shapeLabelsGroup = L.layerGroup();
+
+        if (shapeGeojson) {
+            shapeLayer = L.geoJSON(shapeGeojson, {
+                style: { color: "#e74c3c", weight: 3, fillColor: "#3498db", fillOpacity: 0.3 }
+            }).addTo(map);
+            shapeLabelsGroup.addTo(map);
+            try { map.fitBounds(shapeLayer.getBounds()); } catch(e) {}
+        }
+
+        var bounds = [];
+        groupedLocations.forEach(function(group) {
+            var popupHtml = '<div style="text-align: right; font-family: Tahoma;"><b>مشروع: ' + group.project + '</b><br>الإحداثيات: ' + group.lat + ', ' + group.lon + '<br>عدد النقاط: ' + group.count + '</div>';
+            
+            var marker = L.marker([group.lat, group.lon]).addTo(currentMarkersGroup);
+            marker.bindPopup(popupHtml);
+            
+            var primaryNote = group.items[0] ? group.items[0].note : '';
+            marker.bindTooltip(primaryNote, { permanent: false, direction: 'top' });
+
+            allMarkersData.push({
+                marker: marker,
+                tooltipText: primaryNote
+            });
+            bounds.push([group.lat, group.lon]);
+        });
+
+        if (bounds.length > 0) {
+            map.fitBounds(bounds);
+        }
+
+        var SettingsControl = L.Control.extend({
+            options: { position: 'topright' },
+            onAdd: function (map) {
+                var container = L.DomUtil.create('div', 'map-settings-box');
+                container.innerHTML = '<label><input type="checkbox" id="chkNotes"> إظهار الملاحظات</label>' +
+                                      '<label><input type="checkbox" id="chkShowSupervision" checked> إظهار مناطق الإشراف</label>' +
+                                      '<label><input type="checkbox" id="chkHideSupervision"> إخفاء مناطق الإشراف</label>' +
+                                      '<label><input type="checkbox" id="chkShowSupNames" checked> إظهار أسامي مناطق الإشراف</label>';
+                L.DomEvent.disableClickPropagation(container);
+                
+                setTimeout(function() {
+                    var chkNotes = document.getElementById('chkNotes');
+                    if (chkNotes) {
+                        chkNotes.addEventListener('change', function(e) {
+                            var show = e.target.checked;
+                            allMarkersData.forEach(function(item) {
+                                if (show) { item.marker.bindTooltip(item.tooltipText, { permanent: true, direction: 'top' }).openTooltip(); }
+                                else { item.marker.unbindTooltip(); item.marker.bindTooltip(item.tooltipText, { permanent: false, direction: 'top' }); }
+                            });
+                        });
+                    }
+                }, 100);
+                
+                return container;
+            }
+        });
+        map.addControl(new SettingsControl());
+
+        document.getElementById('downloadReportBtn').addEventListener('click', function() {
+            window.print();
+        });
+    </script>
+</body>
+</html>
