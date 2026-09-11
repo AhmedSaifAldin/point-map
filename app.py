@@ -455,7 +455,7 @@ def login():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>تسجيل الدخول - نظام الخريطة</title>
+        <title>تسجيل الدخول - نظام إدارة الإحداثيات  </title>
         <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
         <style>
             body { margin: 0; padding: 0; font-family: Tahoma, sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; }
@@ -641,7 +641,7 @@ def index():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>نظام إدارة ومتابعة المواقع والمشاريع</title>
+        <title>نظام إدارة الإحداثيات  </title>
         <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
