@@ -2,6 +2,7 @@ import collections
 import json
 import os
 import re
+import tempfile
 from flask import (
     Flask,
     redirect,
@@ -574,10 +575,14 @@ def index():
       if 'excelFile' in request.files:
         file = request.files['excelFile']
         if file.filename != '':
-          path = os.path.join(UPLOAD_FOLDER, 'temp_excel.xlsx')
-          file.save(path)
-          process_excel_file(path)
-          message = 'تمت إضافة ملف الكشف بنجاح واستخراج المواقع!'
+          try:
+            temp_dir = tempfile.gettempdir()
+            path = os.path.join(temp_dir, 'temp_excel.xlsx')
+            file.save(path)
+            process_excel_file(path)
+            message = 'تمت إضافة ملف الكشف بنجاح واستخراج المواقع!'
+          except Exception as e:
+            message = f'حدث خطأ أثناء معالجة الملف: {str(e)}'
 
   locations = load_custom_points()
   locations = enrich_locations_with_shape_data(
@@ -812,6 +817,28 @@ def index():
                     </div>
                 </div>
 
+                <!-- رفع ملف Excel (أصبح تحت تصفية المشروع مباشرة) -->
+                <div class="card-section" style="border: 1px solid #e67e22;">
+                    <div class="card-header-static" style="color: #e67e22;">📁 رفع ملف Excel (روابط / إحداثيات)</div>
+                    <div class="card-body-open">
+                        <form id="excelUploadForm" method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="action" value="upload_coords">
+                            
+                            <div id="dropZone" class="drop-zone">
+                                <p>📁 اسحب ملف Excel هنا أو اضغط للاختيار</p>
+                                <input type="file" id="excelFileInput" name="excelFile" accept=".xlsx, .xls, .csv" required style="display: none;">
+                            </div>
+                            <div id="fileNameDisplay" style="font-size: 11px; color: #27ae60; font-weight: bold; margin-bottom: 6px; text-align: center;"></div>
+
+                            <div style="font-size: 11px; color: rgba(231, 76, 60, 0.7); margin-bottom: 8px; text-align: center; line-height: 1.4;">
+                                عند وضع خط الطول والعرض في الجدول تأكد من تسمية الأعمدة بالشكل الصحيح Latitude و Longitude أو Lat و Long
+                            </div>
+
+                            <button type="submit" style="background-color: #27ae60;"> تحميل المواقع على الخريطة  🗺️</button>
+                        </form>
+                    </div>
+                </div>
+
                 <!-- ألوان الطبقات داخل القائمة الجانبية -->
                 <div class="card-section" style="border: 1px solid #3498db;">
                     <div class="card-header-static" style="color: #3498db; background: #3498db15;">🎨 ألوان الطبقات (Layers Colors)</div>
@@ -825,10 +852,10 @@ def index():
                     <div class="card-header-static" style="color: #8e44ad; background: #8e44ad15;">📍 التنقل السريع بين النقاط</div>
                     <div class="card-body-open">
                         <div class="point-navigator">
-    <button type="button" id="prevPointBtn" title="النقطة السابقة">▶</button>
-    <span id="pointCounterDisplay" class="point-counter-text">نقطة 0 من 0</span>
-    <button type="button" id="nextPointBtn" title="النقطة التالية">◀</button>
-</div>
+                            <button type="button" id="prevPointBtn" title="النقطة السابقة">▶</button>
+                            <span id="pointCounterDisplay" class="point-counter-text">نقطة 0 من 0</span>
+                            <button type="button" id="nextPointBtn" title="النقطة التالية">◀</button>
+                        </div>
                     </div>
                 </div>
 
@@ -877,27 +904,6 @@ def index():
                                 <button type="submit" name="action" value="search_coords_save" style="background-color: #2980b9; flex: 1;">حفظ  </button>
                                 <button type="submit" name="action" value="search_coords_preview" class="btn-preview" style="flex: 1;">استعراض  </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
-
-                <div class="card-section" style="border: 1px solid #e67e22;">
-                    <div class="card-header-static" style="color: #e67e22;">📁 رفع ملف Excel (روابط / إحداثيات)</div>
-                    <div class="card-body-open">
-                        <form id="excelUploadForm" method="POST" enctype="multipart/form-data">
-                            <input type="hidden" name="action" value="upload_coords">
-                            
-                            <div id="dropZone" class="drop-zone">
-                                <p>📁 اسحب ملف Excel هنا أو اضغط للاختيار</p>
-                                <input type="file" id="excelFileInput" name="excelFile" accept=".xlsx, .xls, .csv" required style="display: none;">
-                            </div>
-                            <div id="fileNameDisplay" style="font-size: 11px; color: #27ae60; font-weight: bold; margin-bottom: 6px; text-align: center;"></div>
-
-                            <div style="font-size: 11px; color: rgba(231, 76, 60, 0.7); margin-bottom: 8px; text-align: center; line-height: 1.4;">
-                                عند وضع خط الطول والعرض في الجدول تأكد من تسمية الأعمدة بالشكل الصحيح Latitude و Longitude أو Lat و Long
-                            </div>
-
-                            <button type="submit" style="background-color: #27ae60;"> تحميل المواقع على الخريطة  🗺️</button>
                         </form>
                     </div>
                 </div>
@@ -1028,7 +1034,6 @@ def index():
                 }
             });
 
-            // تعبئة ألوان الطبقات داخل القائمة الجانبية تلقائياً
             var colorContainerHtml = '';
             if (allProjectsList.length === 0) {
                 colorContainerHtml = `<div style="text-align: center; color: #7f8c8d; font-size: 11px;">لا توجد طبقات مشاريع متاحة</div>`;
@@ -1043,7 +1048,6 @@ def index():
             }
             document.getElementById('projectsColorContainer').innerHTML = colorContainerHtml;
 
-            // تفعيل أحداث تغيير الألوان للطبقات
             document.querySelectorAll('.layer-color-picker').forEach(function(picker) {
                 picker.addEventListener('input', function(e) {
                     var projName = e.target.getAttribute('data-project');
@@ -1199,7 +1203,6 @@ def index():
                 bounds.push([group.lat, group.lon]);
             });
 
-            // نظام التنقل بالأسهم بين النقاط مع العداد والتأثير المضيء
             var currentPointIndex = 0;
             var totalPoints = allMarkersData.length;
             var counterDisplay = document.getElementById('pointCounterDisplay');
@@ -1216,16 +1219,13 @@ def index():
 
                 counterDisplay.innerText = `نقطة ${currentPointIndex + 1} من ${totalPoints}`;
 
-                // إعادة تعيين أيقونات جميع النقاط للطبيعي
                 allMarkersData.forEach(function(item, idx) {
                     item.marker.setIcon(createPinIcon(item.count, false));
                 });
 
-                // تفعيل تأثير النبض وزوم على النقطة الحالية
                 var targetData = allMarkersData[currentPointIndex];
                 targetData.marker.setIcon(createPinIcon(targetData.count, true));
 
-                // التعامل مع التجمعات (MarkerCluster) إذا كانت النقطة داخل تجمع
                 currentMarkersGroup.zoomToShowLayer(targetData.marker, function() {
                     map.setView([targetData.lat, targetData.lon], 17, { animate: true });
                     targetData.marker.openPopup();
