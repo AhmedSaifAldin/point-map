@@ -47,7 +47,7 @@ def get_real_coordinates_from_url(short_url):
   }
   try:
     response = requests.get(
-        short_url, headers=headers, allow_redirects=True, timeout=8
+        short_url, headers=headers, allow_redirects=True, timeout=5
     )
     final_url = response.url
 
@@ -110,12 +110,7 @@ def save_custom_point(
 
 def save_custom_points_bulk(new_points):
   points = load_custom_points()
-  for p in new_points:
-    if 'neighborhood' not in p:
-      p['neighborhood'] = '-'
-    if 'extra_details' not in p:
-      p['extra_details'] = {}
-    points.append(p)
+  points.extend(new_points)
 
   try:
     with open(CUSTOM_POINTS_FILE, 'w', encoding='utf-8') as f:
@@ -379,30 +374,10 @@ def process_excel_file(file_path):
       except Exception:
         pass
 
-    if (lat is None or lon is None):
-      for col in df.columns:
-        val_str = str(row[col]).strip()
-        if 'http' in val_str or 'maps' in val_str or 'goo.gl' in val_str or ',' in val_str:
-          if 'http' in val_str or 'maps' in val_str or 'goo.gl' in val_str:
-            maps_url = val_str
-            lat, lon = get_real_coordinates_from_url(maps_url)
-            if lat and lon:
-              break
-          else:
-            parts = val_str.split(',')
-            if len(parts) == 2:
-              try:
-                potential_lat = float(parts[0].strip())
-                potential_lon = float(parts[1].strip())
-                if 15 <= potential_lat <= 35 and 30 <= potential_lon <= 60:
-                  lat, lon = potential_lat, potential_lon
-                  break
-              except Exception:
-                pass
-
     if (lat is None or lon is None) and url_col is not None and pd.notna(row[url_col]):
       maps_url = str(row[url_col]).strip()
-      lat, lon = get_real_coordinates_from_url(maps_url)
+      if 'http' in maps_url or 'maps' in maps_url or 'goo.gl' in maps_url:
+        lat, lon = get_real_coordinates_from_url(maps_url)
 
     if note_col is not None and pd.notna(row[note_col]):
       val = row[note_col]
@@ -642,6 +617,7 @@ def index():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;">
         <title>نظام إدارة الإحداثيات  </title>
         <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -649,6 +625,7 @@ def index():
         <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
         
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
         
@@ -666,7 +643,7 @@ def index():
             .form-group { margin-bottom: 10px; }
             label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 12px; color: #34495e; }
             input[type="text"], select, input[type="file"] { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 6px; box-sizing: border-box; font-size: 13px; background: #fff; font-family: Tahoma, sans-serif; direction: rtl; }
-select { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-image: url('data:image/svg+xml;utf8,<svg fill="%2334495e" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>'); background-repeat: no-repeat; background-position: left 8px center; background-size: 16px; padding-left: 30px; }
+            select { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-image: url('data:image/svg+xml;utf8,<svg fill="%2334495e" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>'); background-repeat: no-repeat; background-position: left 8px center; background-size: 16px; padding-left: 30px; }
             
             .drop-zone {
                 border: 2px dashed #e67e22;
@@ -730,39 +707,10 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
             }
             .map-settings-box input[type="checkbox"] { cursor: pointer; width: 14px; height: 14px; }
 
-            .projects-color-table-box {
-                position: absolute;
-                top: 15px;
-                left: 15px;
-                background: rgba(255, 255, 255, 0.95);
-                border-radius: 8px;
-                box-shadow: 0 3px 14px rgba(0,0,0,0.2);
-                font-family: Tahoma, sans-serif;
-                font-size: 12px;
-                z-index: 1000;
-                min-width: 220px;
-                overflow: hidden;
-            }
-            .projects-color-header {
-                background: #3498db;
-                color: white;
-                padding: 8px 12px;
-                font-weight: bold;
-                font-size: 13px;
-                cursor: pointer;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                user-select: none;
-            }
+            /* تصميم ألوان الطبقات داخل القائمة الجانبية */
             .projects-color-body {
-                padding: 10px 12px;
-                max-height: 300px;
+                max-height: 200px;
                 overflow-y: auto;
-                transition: max-height 0.3s ease;
-            }
-            .projects-color-body.collapsed {
-                display: none;
             }
             .project-color-row {
                 display: flex;
@@ -777,15 +725,65 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                max-width: 140px;
+                max-width: 240px;
+                font-size: 12px;
             }
             .project-color-row input[type="color"] {
                 border: none;
-                width: 28px;
+                width: 32px;
                 height: 24px;
                 cursor: pointer;
                 background: none;
                 padding: 0;
+            }
+
+            /* شريط التنقل بين النقاط بالأسهم */
+            .point-navigator {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                background: #f8fafc;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 8px 12px;
+                margin-top: 5px;
+            }
+            .point-navigator button {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 6px 14px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: bold;
+                width: auto;
+                margin-top: 0;
+                transition: background 0.3s;
+            }
+            .point-navigator button:hover {
+                background-color: #2980b9;
+            }
+            .point-counter-text {
+                font-size: 13px;
+                font-weight: bold;
+                color: #2c3e50;
+            }
+
+            /* تأثير النبض المضيء للنقطة الحالية */
+            @keyframes pulse-ring {
+                0% { transform: scale(0.8); opacity: 1; }
+                50% { transform: scale(1.6); opacity: 0.4; }
+                100% { transform: scale(2.2); opacity: 0; }
+            }
+            .pulse-effect::after {
+                content: '';
+                position: absolute;
+                top: -6px; right: -6px; bottom: -6px; left: -6px;
+                border-radius: 50%;
+                border: 3px solid #e74c3c;
+                animation: pulse-ring 1.5s infinite;
+                z-index: -1;
             }
         </style>
     </head>
@@ -798,6 +796,7 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
                     <div class="alert">{{ message }}</div>
                 {% endif %}
 
+                <!-- تصفية المشروع -->
                 <div class="card-section" style="border: 1px solid #2c3e50;">
                     <div class="card-header-static" style="color: #2c3e50; background: #eab30815;">تصفية المشروع</div>
                     <div class="card-body-open">
@@ -810,6 +809,26 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
                                 {% endfor %}
                             </select>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ألوان الطبقات داخل القائمة الجانبية -->
+                <div class="card-section" style="border: 1px solid #3498db;">
+                    <div class="card-header-static" style="color: #3498db; background: #3498db15;">🎨 ألوان الطبقات (Layers Colors)</div>
+                    <div class="card-body-open projects-color-body" id="projectsColorContainer">
+                        <!-- يتم تعبئتها تلقائياً عبر سكربت الجافاسكريبت -->
+                    </div>
+                </div>
+
+                <!-- شريط التنقل بين المواقع والنقاط بالأسهم -->
+                <div class="card-section" style="border: 1px solid #8e44ad;">
+                    <div class="card-header-static" style="color: #8e44ad; background: #8e44ad15;">📍 التنقل السريع بين النقاط</div>
+                    <div class="card-body-open">
+                        <div class="point-navigator">
+    <button type="button" id="prevPointBtn" title="النقطة السابقة">▶</button>
+    <span id="pointCounterDisplay" class="point-counter-text">نقطة 0 من 0</span>
+    <button type="button" id="nextPointBtn" title="النقطة التالية">◀</button>
+</div>
                     </div>
                 </div>
 
@@ -1009,6 +1028,42 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
                 }
             });
 
+            // تعبئة ألوان الطبقات داخل القائمة الجانبية تلقائياً
+            var colorContainerHtml = '';
+            if (allProjectsList.length === 0) {
+                colorContainerHtml = `<div style="text-align: center; color: #7f8c8d; font-size: 11px;">لا توجد طبقات مشاريع متاحة</div>`;
+            } else {
+                allProjectsList.forEach(function(proj) {
+                    var currentColor = layerColorMap[proj] || '#e74c3c';
+                    colorContainerHtml += `<div class="project-color-row">` +
+                                            `<span title="${proj}">${proj}</span>` +
+                                            `<input type="color" class="layer-color-picker" data-project="${proj}" value="${currentColor}">` +
+                                          `</div>`;
+                });
+            }
+            document.getElementById('projectsColorContainer').innerHTML = colorContainerHtml;
+
+            // تفعيل أحداث تغيير الألوان للطبقات
+            document.querySelectorAll('.layer-color-picker').forEach(function(picker) {
+                picker.addEventListener('input', function(e) {
+                    var projName = e.target.getAttribute('data-project');
+                    var newColor = e.target.value;
+                    
+                    layerColorMap[projName] = newColor;
+                    layerCustomColors[projName] = newColor;
+                    localStorage.setItem('layerCustomColors', JSON.stringify(layerCustomColors));
+
+                    shapeFeatureLayers.forEach(function(item) {
+                        if (item.project === projName) {
+                            item.layer.setStyle({
+                                color: newColor,
+                                fillColor: newColor
+                            });
+                        }
+                    });
+                });
+            });
+
             if (shapeGeojson) {
                 shapeLayer = L.geoJSON(shapeGeojson, {
                     style: function (feature) {
@@ -1067,20 +1122,23 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
             var bounds = [];
 
             var allMarkersData = [];
-            var currentMarkersGroup = L.layerGroup().addTo(map);
+            var currentMarkersGroup = L.markerClusterGroup().addTo(map);
 
-            function createPinIcon(count) {
+            function createPinIcon(count, isHighlighted = false) {
                 var badgeHtml = '';
                 if (count > 1) {
                     badgeHtml = `<div style="position: absolute; top: -2px; right: -4px; background: #e74c3c; color: white; border-radius: 50%; min-width: 16px; height: 16px; padding: 0 3px; font-size: 9px; font-weight: bold; display: flex; align-items: center; justify-content: center; border: 1.5px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">${count}</div>`;
                 }
+                var pulseClass = isHighlighted ? ' pulse-effect' : '';
+                var pinColor = isHighlighted ? '#e74c3c' : '#8e44ad';
+
                 return L.divIcon({
-                    className: 'custom-pin',
+                    className: 'custom-pin' + pulseClass,
                     html: `<div style="position: relative; width: 24px; height: 30px; filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.4));">
                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" width="24" height="30">
-                               <path fill="#8e44ad" d="M172.2 501.4C27 291 0 269.4 0 192 0 86 86 0 192 0s192 86 192 192c0 77.4-27 99-172.2 309.4-7.8 11.2-23.9 11.2-31.6 0z"/>
+                               <path fill="${pinColor}" d="M172.2 501.4C27 291 0 269.4 0 192 0 86 86 0 192 0s192 86 192 192c0 77.4-27 99-172.2 309.4-7.8 11.2-23.9 11.2-31.6 0z"/>
                                <circle cx="192" cy="192" r="75" fill="#ffffff" />
-                               <path fill="#8e44ad" d="M192 130a50 50 0 1 0 0 100 50 50 0 1 0 0-100z"/>
+                               <path fill="${pinColor}" d="M192 130a50 50 0 1 0 0 100 50 50 0 1 0 0-100z"/>
                              </svg>
                              ${badgeHtml}
                            </div>`,
@@ -1120,7 +1178,7 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
                 popupHtml += `</div>`;
 
                 var marker = L.marker([group.lat, group.lon], {
-                    icon: createPinIcon(group.count)
+                    icon: createPinIcon(group.count, false)
                 });
 
                 marker.bindPopup(popupHtml);
@@ -1133,154 +1191,188 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
                     lat: group.lat,
                     lon: group.lon,
                     items: group.items,
-                    tooltipText: tooltipText
+                    tooltipText: tooltipText,
+                    count: group.count
                 });
 
                 currentMarkersGroup.addLayer(marker);
                 bounds.push([group.lat, group.lon]);
             });
 
+            // نظام التنقل بالأسهم بين النقاط مع العداد والتأثير المضيء
+            var currentPointIndex = 0;
+            var totalPoints = allMarkersData.length;
+            var counterDisplay = document.getElementById('pointCounterDisplay');
+
+            function updatePointNavigation(index) {
+                if (totalPoints === 0) {
+                    counterDisplay.innerText = "لا توجد نقاط متاحة";
+                    return;
+                }
+
+                if (index < 0) currentPointIndex = totalPoints - 1;
+                else if (index >= totalPoints) currentPointIndex = 0;
+                else currentPointIndex = index;
+
+                counterDisplay.innerText = `نقطة ${currentPointIndex + 1} من ${totalPoints}`;
+
+                // إعادة تعيين أيقونات جميع النقاط للطبيعي
+                allMarkersData.forEach(function(item, idx) {
+                    item.marker.setIcon(createPinIcon(item.count, false));
+                });
+
+                // تفعيل تأثير النبض وزوم على النقطة الحالية
+                var targetData = allMarkersData[currentPointIndex];
+                targetData.marker.setIcon(createPinIcon(targetData.count, true));
+
+                // التعامل مع التجمعات (MarkerCluster) إذا كانت النقطة داخل تجمع
+                currentMarkersGroup.zoomToShowLayer(targetData.marker, function() {
+                    map.setView([targetData.lat, targetData.lon], 17, { animate: true });
+                    targetData.marker.openPopup();
+                });
+            }
+
+            if (totalPoints > 0) {
+                counterDisplay.innerText = `نقطة 1 من ${totalPoints}`;
+            } else {
+                counterDisplay.innerText = `نقطة 0 من 0`;
+            }
+
+            document.getElementById('prevPointBtn').addEventListener('click', function() {
+                if (totalPoints > 0) updatePointNavigation(currentPointIndex - 1);
+            });
+
+            document.getElementById('nextPointBtn').addEventListener('click', function() {
+                if (totalPoints > 0) updatePointNavigation(currentPointIndex + 1);
+            });
+
             document.getElementById('downloadReportBtn').addEventListener('click', function() {
                 var btn = this;
-                btn.innerText = "جاري تجهيز الخريطة والتقرير... ⏳";
+                btn.innerText = "جاري تجهيز وتصدير التقرير... ⏳";
                 btn.style.opacity = "0.7";
 
                 var mapElement = document.getElementById('map');
-                var originalWidth = mapElement.style.width;
-                var originalHeight = mapElement.style.height;
-                
-                mapElement.style.width = '1200px';
-                mapElement.style.height = '700px';
-                map.invalidateSize();
 
-                setTimeout(function() {
-                    html2canvas(mapElement, {
-                        useCORS: true,
-                        allowTaint: false,
-                        scale: 2,
-                        logging: false
-                    }).then(function(canvas) {
-                        mapElement.style.width = originalWidth;
-                        mapElement.style.height = originalHeight;
-                        map.invalidateSize();
+                html2canvas(mapElement, {
+                    useCORS: true,
+                    allowTaint: true,
+                    scale: 1.5,
+                    logging: false
+                }).then(function(canvas) {
+                    var mapImgUrl = canvas.toDataURL('image/png');
 
-                        var mapImgUrl = canvas.toDataURL('image/png');
+                    var projSelect = document.getElementById('projectFilter');
+                    var selectedProjName = projSelect.options[projSelect.selectedIndex].text.replace(/[🌐]/g, '').trim();
+                    
+                    var now = new Date();
+                    var dateStr = now.toLocaleDateString('en-GB');
+                    var timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                    var dateTimeFullStr = dateStr + ' - ' + timeStr;
 
-                        var projSelect = document.getElementById('projectFilter');
-                        var selectedProjName = projSelect.options[projSelect.selectedIndex].text.replace(/[🌐]/g, '').trim();
-                        
-                        var now = new Date();
-                        var dateStr = now.toLocaleDateString('en-GB');
-                        var timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-                        var dateTimeFullStr = dateStr + ' - ' + timeStr;
+                    var fileDateStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+                    var fileTimeStr = String(now.getHours()).padStart(2, '0') + '-' + String(now.getMinutes()).padStart(2, '0');
+                    var fileName = `تقرير_${selectedProjName}_${fileDateStr}_${fileTimeStr}.pdf`;
 
-                        var fileDateStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-                        var fileTimeStr = String(now.getHours()).padStart(2, '0') + '-' + String(now.getMinutes()).padStart(2, '0');
-                        var fileName = `تقرير_${selectedProjName}_${fileDateStr}_${fileTimeStr}.pdf`;
-
-                        // جمع كافة الأعمدة الديناميكية الفريدة من جميع العناصر لإنشاء جدول شامل
-                        var allDynamicKeys = [];
-                        allMarkersData.forEach(function(data) {
-                            data.items.forEach(function(item) {
-                                if (item.extra_details) {
-                                    Object.keys(item.extra_details).forEach(function(k) {
-                                        if (!allDynamicKeys.includes(k)) {
-                                            allDynamicKeys.push(k);
-                                        }
-                                    });
-                                }
-                            });
-                        });
-
-                        var allFlatItems = [];
-                        allMarkersData.forEach(function(data) {
-                            data.items.forEach(function(item) {
-                                allFlatItems.push({
-                                    lat: data.lat,
-                                    lon: data.lon,
-                                    round_id: item.round_id || '-',
-                                    note: item.note,
-                                    url: item.url,
-                                    project: data.project,
-                                    extra_details: item.extra_details || {}
+                    var allDynamicKeys = [];
+                    allMarkersData.forEach(function(data) {
+                        data.items.forEach(function(item) {
+                            if (item.extra_details) {
+                                Object.keys(item.extra_details).forEach(function(k) {
+                                    if (!allDynamicKeys.includes(k)) {
+                                        allDynamicKeys.push(k);
+                                    }
                                 });
+                            }
+                        });
+                    });
+
+                    var allFlatItems = [];
+                    allMarkersData.forEach(function(data) {
+                        data.items.forEach(function(item) {
+                            var mapLink = (item.url && item.url !== '#') ? item.url : `https://www.google.com/maps?q=${data.lat},${data.lon}`;
+                            allFlatItems.push({
+                                lat: data.lat,
+                                lon: data.lon,
+                                round_id: item.round_id || '-',
+                                note: item.note,
+                                url: mapLink,
+                                project: data.project,
+                                extra_details: item.extra_details || {}
                             });
                         });
+                    });
 
-                        var htmlContent = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير الخريطة والبيانات</title><style>
-                            body { font-family: Tahoma, sans-serif; padding: 10px; background: #fff; color: #333; }
-                            h1 { text-align: center; color: #2c3e50; font-size: 16px; margin-bottom: 3px; }
-                            .report-meta { text-align: center; color: #7f8c8d; font-size: 11px; margin-bottom: 10px; direction: ltr; unicode-bidi: embed; }
-                            .map-container-pdf { width: 100%; text-align: center; margin-bottom: 10px; }
-                            .map-img { width: 100%; max-height: 480px; object-fit: contain; border: 1px solid #ccc; border-radius: 4px; }
-                            table { width: 100%; border-collapse: collapse; margin-top: 5px; }
-                            th, td { border: 1px solid #ddd; padding: 5px 8px; text-align: right; font-size: 10px; }
-                            th { background-color: #2c3e50; color: white; }
-                            tr:nth-child(even) { background-color: #f9f9f9; }
-                        </style></head><body>
-                        <h1>التقرير   : <span dir="ltr" style="unicode-bidi: embed;">${selectedProjName}</span></h1>
-                        <div class="report-meta">${dateTimeFullStr}</div>
-                        <div class="map-container-pdf"><img src="${mapImgUrl}" class="map-img"></div>
-                        <h2 style="font-size: 13px; margin: 10px 0 5px 0; color: #2c3e50;">جدول تفاصيل البيانات والمواقع</h2>
-                        <table>
-                            <thead><tr>
-                                <th>م</th>
-                                <th>المشروع</th>
-                                <th>ملاحظة</th>
-                                <th>خط الطول (Lat)</th>
-                                <th>خط العرض (Lon)</th>
-                                <th>منطقة الإشراف</th>`;
+                    var htmlContent = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير الخريطة والبيانات</title><style>
+                        body { font-family: Tahoma, sans-serif; padding: 10px; background: #fff; color: #333; }
+                        h1 { text-align: center; color: #2c3e50; font-size: 15px; margin-bottom: 2px; }
+                        .report-meta { text-align: center; color: #7f8c8d; font-size: 10px; margin-bottom: 8px; direction: ltr; unicode-bidi: embed; }
+                        .map-container-pdf { width: 100%; text-align: center; margin-bottom: 10px; }
+                        .map-img { width: 100%; max-height: 320px; object-fit: contain; border: 1px solid #ccc; border-radius: 4px; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+                        th, td { border: 1px solid #ddd; padding: 5px 8px; text-align: right; font-size: 9px; }
+                        th { background-color: #2c3e50; color: white; }
+                        tr:nth-child(even) { background-color: #f9f9f9; }
+                        .map-btn { background-color: #27ae60; color: white !important; padding: 2px 6px; text-decoration: none; border-radius: 3px; font-weight: bold; display: inline-block; font-size: 8px; }
+                    </style></head><body>
+                    <h1>تقرير المشروع: <span dir="ltr" style="unicode-bidi: embed;">${selectedProjName}</span></h1>
+                    <div class="report-meta">${dateTimeFullStr}</div>
+                    <div class="map-container-pdf"><img src="${mapImgUrl}" class="map-img"></div>
+                    <h2 style="font-size: 12px; margin: 8px 0 4px 0; color: #2c3e50;">جدول تفاصيل البيانات والمواقع</h2>
+                    <table>
+                        <thead><tr>
+                            <th>م</th>
+                            <th>المشروع</th>
+                            <th>ملاحظة</th>
+                            <th>خط الطول (Lat)</th>
+                            <th>خط العرض (Lon)</th>
+                            <th>منطقة الإشراف</th>`;
+                    
+                    allDynamicKeys.forEach(function(key) {
+                        htmlContent += `<th>${key}</th>`;
+                    });
+
+                    htmlContent += `<th>الذهاب للموقع</th></tr></thead><tbody>`;
+
+                    var counter = 1;
+                    allFlatItems.forEach(function(item) {
+                        htmlContent += `<tr>
+                            <td>${counter++}</td>
+                            <td><b>${item.project}</b></td>
+                            <td>${item.note}</td>
+                            <td>${item.lat.toFixed(5)}</td>
+                            <td>${item.lon.toFixed(5)}</td>
+                            <td><span style="color: #2980b9; font-weight: bold;">${item.round_id}</span></td>`;
                         
                         allDynamicKeys.forEach(function(key) {
-                            htmlContent += `<th>${key}</th>`;
+                            var val = item.extra_details[key] !== undefined ? item.extra_details[key] : '-';
+                            htmlContent += `<td>${val}</td>`;
                         });
 
-                        htmlContent += `</tr></thead><tbody>`;
+                        htmlContent += `<td><a href="${item.url}" target="_blank" class="map-btn">فتح الموقع ↗</a></td></tr>`;
+                    });
 
-                        var counter = 1;
-                        allFlatItems.forEach(function(item) {
-                            htmlContent += `<tr>
-                                <td>${counter++}</td>
-                                <td><b>${item.project}</b></td>
-                                <td>${item.note}</td>
-                                <td>${item.lat.toFixed(5)}</td>
-                                <td>${item.lon.toFixed(5)}</td>
-                                <td><span style="color: #2980b9; font-weight: bold;">${item.round_id}</span></td>`;
-                            
-                            allDynamicKeys.forEach(function(key) {
-                                var val = item.extra_details[key] !== undefined ? item.extra_details[key] : '-';
-                                htmlContent += `<td>${val}</td>`;
-                            });
+                    htmlContent += `</tbody></table></body></html>`;
 
-                            htmlContent += `</tr>`;
-                        });
+                    var element = document.createElement('div');
+                    element.innerHTML = htmlContent;
 
-                        htmlContent += `</tbody></table></body></html>`;
+                    var opt = {
+                        margin:       5,
+                        filename:     fileName,
+                        image:        { type: 'jpeg', quality: 0.90 },
+                        html2canvas:  { scale: 2, useCORS: true, allowTaint: true, logging: false },
+                        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
+                    };
 
-                        var element = document.createElement('div');
-                        element.innerHTML = htmlContent;
-
-                        var opt = {
-                            margin:       5,
-                            filename:     fileName,
-                            image:        { type: 'jpeg', quality: 0.92 },
-                            html2canvas:  { scale: 2, useCORS: true, logging: false },
-                            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
-                        };
-
-                        html2pdf().from(element).set(opt).save().then(function() {
-                            btn.innerText = "تحميل تقرير الخريطة PDF 📄";
-                            btn.style.opacity = "1";
-                        });
-                    }).catch(function(err) {
-                        mapElement.style.width = originalWidth;
-                        mapElement.style.height = originalHeight;
-                        map.invalidateSize();
-                        alert('حدث خطأ أثناء أخذ لقطة الشاشة للخريطة.');
+                    html2pdf().from(element).set(opt).save().then(function() {
                         btn.innerText = "تحميل تقرير الخريطة PDF 📄";
                         btn.style.opacity = "1";
                     });
-                }, 800);
+                }).catch(function(err) {
+                    alert('حدث خطأ أثناء أخذ لقطة الشاشة للخريطة.');
+                    btn.innerText = "تحميل تقرير الخريطة PDF 📄";
+                    btn.style.opacity = "1";
+                });
             });
 
             var SettingsControl = L.Control.extend({
@@ -1347,78 +1439,9 @@ select { appearance: none; -webkit-appearance: none; -moz-appearance: none; back
             });
             map.addControl(new SettingsControl());
 
-            var ProjectsColorControl = L.Control.extend({
-                options: { position: 'topleft' },
-                onAdd: function (map) {
-                    var container = L.DomUtil.create('div', 'projects-color-table-box');
-                    var html = `<div class="projects-color-header" id="projectsHeaderToggle">
-                                    <span> layers Colors   </span>
-                                    <span id="toggleIcon">▼</span>
-                                </div>
-                                <div class="projects-color-body" id="projectsBodyContent">`;
-                    
-                    if (allProjectsList.length === 0) {
-                        html += `<div style="text-align: center; color: #7f8c8d; font-size: 11px;">لا توجد مشاريع متاحة</div>`;
-                    } else {
-                        allProjectsList.forEach(function(proj) {
-                            var currentColor = layerColorMap[proj] || '#e74c3c';
-                            html += `<div class="project-color-row">` +
-                                    `<span title="${proj}">${proj}</span>` +
-                                    `<input type="color" class="layer-color-picker" data-project="${proj}" value="${currentColor}">` +
-                                    `</div>`;
-                        });
-                    }
-                    html += `</div>`;
-                    
-                    container.innerHTML = html;
-                    L.DomEvent.disableClickPropagation(container);
-                    L.DomEvent.disableScrollPropagation(container);
-
-                    setTimeout(function() {
-                        var headerToggle = document.getElementById('projectsHeaderToggle');
-                        var bodyContent = document.getElementById('projectsBodyContent');
-                        var toggleIcon = document.getElementById('toggleIcon');
-
-                        headerToggle.addEventListener('click', function(e) {
-                            bodyContent.classList.toggle('collapsed');
-                            if (bodyContent.classList.contains('collapsed')) {
-                                toggleIcon.innerText = '▲';
-                            } else {
-                                toggleIcon.innerText = '▼';
-                            }
-                        });
-
-                        var pickers = container.querySelectorAll('.layer-color-picker');
-                        pickers.forEach(function(picker) {
-                            picker.addEventListener('input', function(e) {
-                                var projName = e.target.getAttribute('data-project');
-                                var newColor = e.target.value;
-                                
-                                layerColorMap[projName] = newColor;
-                                layerCustomColors[projName] = newColor;
-                                
-                                localStorage.setItem('layerCustomColors', JSON.stringify(layerCustomColors));
-
-                                shapeFeatureLayers.forEach(function(item) {
-                                    if (item.project === projName) {
-                                        item.layer.setStyle({
-                                            color: newColor,
-                                            fillColor: newColor
-                                        });
-                                    }
-                                });
-                            });
-                        });
-                    }, 100);
-
-                    return container;
-                }
-            });
-            map.addControl(new ProjectsColorControl());
-
             if (searchTarget) {
                 map.setView([searchTarget.lat, searchTarget.lon], 17);
-                L.marker([searchTarget.lat, searchTarget.lon], { icon: createPinIcon(1) }).addTo(map).bindPopup(searchTarget.note).openPopup();
+                L.marker([searchTarget.lat, searchTarget.lon], { icon: createPinIcon(1, true) }).addTo(map).bindPopup(searchTarget.note).openPopup();
             } else if (shapeLayer) {
                 try {
                     map.fitBounds(shapeLayer.getBounds());
