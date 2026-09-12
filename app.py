@@ -3,6 +3,7 @@ import json
 import os
 import re
 import tempfile
+import uuid
 from flask import (
     Flask,
     redirect,
@@ -25,6 +26,7 @@ USERNAME = 'admin'
 PASSWORD = '123'
 
 CUSTOM_POINTS_FILE = os.path.join(UPLOAD_FOLDER, 'custom_points_temp.json')
+CHUNKS_FILE = os.path.join(UPLOAD_FOLDER, 'chunks_temp.json')
 
 
 def get_real_coordinates_from_url(short_url):
@@ -116,6 +118,24 @@ def save_custom_points_bulk(new_points):
   try:
     with open(CUSTOM_POINTS_FILE, 'w', encoding='utf-8') as f:
       json.dump(points, f, ensure_ascii=False)
+  except Exception:
+    pass
+
+
+def load_chunks():
+  if os.path.exists(CHUNKS_FILE):
+    try:
+      with open(CHUNKS_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+    except Exception:
+      return []
+  return []
+
+
+def save_chunks(chunks):
+  try:
+    with open(CHUNKS_FILE, 'w', encoding='utf-8') as f:
+      json.dump(chunks, f, ensure_ascii=False)
   except Exception:
     pass
 
@@ -283,7 +303,6 @@ def enrich_locations_with_shape_data(locations, proj_id):
     if lat and lon:
       pt = Point(lon, lat)
       for gdf, proj_name in gdfs:
-        # استخدام الفهرس المكاني (sindex) للبحث السريع جداً
         possible_matches_index = list(gdf.sindex.intersection(pt.bounds))
         if possible_matches_index:
           possible_matches = gdf.iloc[possible_matches_index]
@@ -319,17 +338,17 @@ def enrich_locations_with_shape_data(locations, proj_id):
   return locations
 
 
-def process_excel_file(file_path):
+def process_excel_file_to_chunks(file_path, chunk_size=200):
   try:
     df = pd.read_excel(file_path)
   except Exception:
     try:
       df = pd.read_csv(file_path)
     except Exception:
-      return
+      return 0
 
   if df.empty or len(df.columns) == 0:
-    return
+    return 0
 
   lat_col, lon_col, url_col, note_col, project_col = None, None, None, None, None
 
@@ -412,8 +431,26 @@ def process_excel_file(file_path):
           'extra_details': extra_details,
       })
 
-  if bulk_points:
-    save_custom_points_bulk(bulk_points)
+  if not bulk_points:
+    return 0
+
+  existing_chunks = load_chunks()
+  new_chunks = []
+  
+  for i in range(0, len(bulk_points), chunk_size):
+    chunk_pts = bulk_points[i:i + chunk_size]
+    chunk_id = str(uuid.uuid4())[:8]
+    chunk_name = f"مجموعة ملف ({i + 1} إلى {min(i + chunk_size, len(bulk_points))}) - {len(chunk_pts)} نقطة"
+    new_chunks.append({
+        'id': chunk_id,
+        'name': chunk_name,
+        'points': chunk_pts,
+        'added': False
+    })
+
+  existing_chunks.extend(new_chunks)
+  save_chunks(existing_chunks)
+  return len(new_chunks)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -433,9 +470,8 @@ def login():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>تسجيل الدخول - نظام إدارة الإحداثيات  </title>
+        <title>تسجيل الدخول - نظام إدارة الإحداثيات</title>
         <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
-        
         <style>
             body { margin: 0; padding: 0; font-family: Tahoma, sans-serif; background: #f4f7f6; display: flex; justify-content: center; align-items: center; height: 100vh; }
             .login-card { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 320px; box-sizing: border-box; }
@@ -483,11 +519,12 @@ def clear_data():
   if not session.get('logged_in'):
     return redirect(url_for('login'))
 
-  if os.path.exists(CUSTOM_POINTS_FILE):
-    try:
-      os.remove(CUSTOM_POINTS_FILE)
-    except Exception:
-      pass
+  for f_path in [CUSTOM_POINTS_FILE, CHUNKS_FILE]:
+    if os.path.exists(f_path):
+      try:
+        os.remove(f_path)
+      except Exception:
+        pass
 
   return redirect(url_for('index'))
 
@@ -578,19 +615,61 @@ def index():
         file = request.files['excelFile']
         if file.filename != '':
           try:
+            chunk_size_val = int(request.form.get('chunk_size', 200))
+            if chunk_size_val < 1:
+              chunk_size_val = 200
+
             temp_dir = tempfile.gettempdir()
             path = os.path.join(temp_dir, 'temp_excel.xlsx')
             file.save(path)
-            process_excel_file(path)
-            message = 'تمت إضافة ملف الكشف بنجاح واستخراج المواقع!'
+            num_chunks = process_excel_file_to_chunks(path, chunk_size=chunk_size_val)
+            if num_chunks > 0:
+              message = f'تمت معالجة الملف وتقسيمه إلى {num_chunks} مجموعات (بحجم {chunk_size_val} نقطة لكل مجموعة) بنجاح!'
+            else:
+              message = 'تعذر استخراج بيانات صحيحة من الملف!'
           except Exception as e:
             message = f'حدث خطأ أثناء معالجة الملف: {str(e)}'
+
+    elif action == 'add_chunk_to_map':
+      chunk_id = request.form.get('chunk_id')
+      chunks = load_chunks()
+      target_chunk = None
+      for ch in chunks:
+        if ch['id'] == chunk_id and not ch['added']:
+          target_chunk = ch
+          break
+      if target_chunk:
+        save_custom_points_bulk(target_chunk['points'])
+        target_chunk['added'] = True
+        save_chunks(chunks)
+        message = f'تمت إضافة "{target_chunk["name"]}" إلى الخريطة بنجاح!'
+
+    elif action == 'add_all_chunks':
+      chunks = load_chunks()
+      added_count = 0
+      for ch in chunks:
+        if not ch['added']:
+          save_custom_points_bulk(ch['points'])
+          ch['added'] = True
+          added_count += 1
+      if added_count > 0:
+        save_chunks(chunks)
+        message = f'تمت إضافة جميع المجموعات ({added_count}) إلى الخريطة بنجاح!'
+
+    elif action == 'clear_chunks':
+      if os.path.exists(CHUNKS_FILE):
+        try:
+          os.remove(CHUNKS_FILE)
+        except Exception:
+          pass
+      message = 'تم مسح المجموعات المعالجة بنجاح.'
 
   locations = load_custom_points()
   locations = enrich_locations_with_shape_data(
       locations, selected_shape_project
   )
 
+  chunks_list = load_chunks()
   available_shapes = get_available_shapefiles()
 
   selected_shape_name = 'كل المشاريع والمناطق'
@@ -625,7 +704,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;">
-        <title>نظام إدارة الإحداثيات  </title>
+        <title>نظام إدارة الإحداثيات</title>
         <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
@@ -649,7 +728,7 @@ def index():
 
             .form-group { margin-bottom: 10px; }
             label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 12px; color: #34495e; }
-            input[type="text"], select, input[type="file"] { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 6px; box-sizing: border-box; font-size: 13px; background: #fff; font-family: Tahoma, sans-serif; direction: rtl; }
+            input[type="text"], select, input[type="file"], input[type="number"] { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 6px; box-sizing: border-box; font-size: 13px; background: #fff; font-family: Tahoma, sans-serif; direction: rtl; }
             select { appearance: none; -webkit-appearance: none; -moz-appearance: none; background-image: url('data:image/svg+xml;utf8,<svg fill="%2334495e" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>'); background-repeat: no-repeat; background-position: left 8px center; background-size: 16px; padding-left: 30px; }
             
             .drop-zone {
@@ -714,7 +793,6 @@ def index():
             }
             .map-settings-box input[type="checkbox"] { cursor: pointer; width: 14px; height: 14px; }
 
-            /* تصميم ألوان الطبقات داخل القائمة الجانبية */
             .projects-color-body {
                 max-height: 200px;
                 overflow-y: auto;
@@ -744,7 +822,6 @@ def index():
                 padding: 0;
             }
 
-            /* شريط التنقل بين النقاط بالأسهم */
             .point-navigator {
                 display: flex;
                 align-items: center;
@@ -777,7 +854,6 @@ def index():
                 color: #2c3e50;
             }
 
-            /* تأثير النبض المضيء للنقطة الحالية */
             @keyframes pulse-ring {
                 0% { transform: scale(0.8); opacity: 1; }
                 50% { transform: scale(1.6); opacity: 0.4; }
@@ -797,7 +873,7 @@ def index():
     <body>
         <div class="sidebar">
             <div>
-                <h2>إدارة الإحداثيات </h2>
+                <h2>إدارة الإحداثيات</h2>
 
                 {% if message %}
                     <div class="alert">{{ message }}</div>
@@ -819,9 +895,9 @@ def index():
                     </div>
                 </div>
 
-                <!-- رفع ملف Excel (أصبح تحت تصفية المشروع مباشرة) -->
+                <!-- رفع ملف Excel ومعالجته في الخلفية مع حجم مجموعة مرن -->
                 <div class="card-section" style="border: 1px solid #e67e22;">
-                    <div class="card-header-static" style="color: #e67e22;">📁 رفع ملف Excel (روابط / إحداثيات)</div>
+                    <div class="card-header-static" style="color: #e67e22;">📁 رفع ومعالجة ملف Excel </div>
                     <div class="card-body-open">
                         <form id="excelUploadForm" method="POST" enctype="multipart/form-data">
                             <input type="hidden" name="action" value="upload_coords">
@@ -832,21 +908,58 @@ def index():
                             </div>
                             <div id="fileNameDisplay" style="font-size: 11px; color: #27ae60; font-weight: bold; margin-bottom: 6px; text-align: center;"></div>
 
-                            <div style="font-size: 11px; color: rgba(231, 76, 60, 0.7); margin-bottom: 8px; text-align: center; line-height: 1.4;">
-                                عند وضع خط الطول والعرض في الجدول تأكد من تسمية الأعمدة بالشكل الصحيح Latitude و Longitude أو Lat و Long
+                            <div class="form-group" style="margin-bottom: 8px;">
+                                <label for="chunkSizeInput"> المجموعة (عدد المصفوفات):</label>
+                                <input type="number" id="chunkSizeInput" name="chunk_size" value="200" min="1" step="1">
                             </div>
 
-                            <button type="submit" style="background-color: #27ae60;"> تحميل المواقع على الخريطة  🗺️</button>
+                            <div style="font-size: 11px; color: rgba(231, 76, 60, 0.7); margin-bottom: 8px; text-align: center; line-height: 1.4;">
+                                يتم تقسيم الملف إلى مجموعات بناءً على العدد المحدد أعلاه.
+                            </div>
+
+                            <button type="submit" style="background-color: #e67e22;"> معالجة وتقسيم الملف ⚙️</button>
                         </form>
                     </div>
                 </div>
 
+                <!-- قائمة المجموعات المقسمة (Chunks) وإضافة كل جزء للخريطة -->
+                {% if chunks_list %}
+                <div class="card-section" style="border: 1px solid #8e44ad;">
+                    <div class="card-header-static" style="color: #8e44ad; background: #8e44ad15;">
+                        <span>📦 مجموعات الملفات المقسمة</span>
+                        <a href="/clear" style="font-size: 10px; color: #e74c3c; text-decoration: none;" onclick="event.preventDefault(); document.getElementById('clearChunksForm').submit();">مسح الكل</a>
+                        <form id="clearChunksForm" method="POST" style="display:none;"><input type="hidden" name="action" value="clear_chunks"></form>
+                    </div>
+                    <div class="card-body-open" style="max-height: 220px; overflow-y: auto;">
+                        <form method="POST" style="margin-bottom: 8px;">
+                            <input type="hidden" name="action" value="add_all_chunks">
+                            <button type="submit" style="background-color: #8e44ad; padding: 6px; font-size: 12px; margin-top: 0; margin-bottom: 8px;">إضافة كافة المجموعات للخريطة دفعة واحدة 🚀</button>
+                        </form>
+                        {% for chunk in chunks_list %}
+                            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; gap: 5px;">
+                                <div style="font-size: 11px; color: #2c3e50; overflow: hidden; text-overflow: ellipsis;">
+                                    <b>{{ chunk.name }}</b><br>
+                                    <span style="color: {% if chunk.added %}#27ae60{% else %}#e67e22{% endif %}; font-weight: bold;">
+                                        {% if chunk.added %}تمت الإضافة ✅{% else %}بانتظار الإضافة ⏳{% endif %}
+                                    </span>
+                                </div>
+                                {% if not chunk.added %}
+                                <form method="POST" style="margin: 0;">
+                                    <input type="hidden" name="action" value="add_chunk_to_map">
+                                    <input type="hidden" name="chunk_id" value="{{ chunk.id }}">
+                                    <button type="submit" style="background-color: #27ae60; padding: 6px 10px; font-size: 11px; margin-top: 0; width: auto; white-space: nowrap;">إضافة للخريطة 🗺️</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
                 <!-- ألوان الطبقات داخل القائمة الجانبية -->
                 <div class="card-section" style="border: 1px solid #3498db;">
                     <div class="card-header-static" style="color: #3498db; background: #3498db15;">🎨 ألوان الطبقات (Layers Colors)</div>
-                    <div class="card-body-open projects-color-body" id="projectsColorContainer">
-                        <!-- يتم تعبئتها تلقائياً عبر سكربت الجافاسكريبت -->
-                    </div>
+                    <div class="card-body-open projects-color-body" id="projectsColorContainer"></div>
                 </div>
 
                 <!-- شريط التنقل بين المواقع والنقاط بالأسهم -->
@@ -870,7 +983,7 @@ def index():
                                 <input type="text" name="project_name" placeholder="اسم المشروع" value=" ">
                             </div>
                             <div class="form-group">
-                                <label>رابط الموقع  :</label>
+                                <label>رابط الموقع:</label>
                                 <input type="text" name="maps_url" placeholder="https://maps.app.goo.gl/..." required>
                             </div>
                             <div class="form-group">
@@ -878,8 +991,8 @@ def index():
                                 <input type="text" name="maps_note" placeholder="تفاصيل الموقع...">
                             </div>
                             <div class="btn-group">
-                                <button type="submit" name="action" value="search_map_url" style="background-color: #2980b9; flex: 1;">حفظ </button>
-                                <button type="submit" name="action" value="preview_map_url" class="btn-preview" style="flex: 1;">استعراض </button>
+                                <button type="submit" name="action" value="search_map_url" style="background-color: #2980b9; flex: 1;">حفظ</button>
+                                <button type="submit" name="action" value="preview_map_url" class="btn-preview" style="flex: 1;">استعراض</button>
                             </div>
                         </form>
 
@@ -903,8 +1016,8 @@ def index():
                                 <input type="text" name="coord_note" placeholder="تفاصيل الإحداثيات..." required>
                             </div>
                             <div class="btn-group">
-                                <button type="submit" name="action" value="search_coords_save" style="background-color: #2980b9; flex: 1;">حفظ  </button>
-                                <button type="submit" name="action" value="search_coords_preview" class="btn-preview" style="flex: 1;">استعراض  </button>
+                                <button type="submit" name="action" value="search_coords_save" style="background-color: #2980b9; flex: 1;">حفظ</button>
+                                <button type="submit" name="action" value="search_coords_preview" class="btn-preview" style="flex: 1;">استعراض</button>
                             </div>
                         </form>
                     </div>
@@ -914,8 +1027,8 @@ def index():
             <div>
                 <button type="button" id="downloadReportBtn" class="btn-download">تحميل تقرير الخريطة PDF 📄</button>
                 <div class="actions-bar">
-                    <a href="/clear" class="btn-clear">مسح الخريطة </a>
-                    <a href="/logout" class="btn-logout">تسجيل الخروج </a>
+                    <a href="/clear" class="btn-clear">مسح الخريطة</a>
+                    <a href="/logout" class="btn-logout">تسجيل الخروج</a>
                 </div>
                 <div class="designer-credit"> Designed By Ahmed Saif Alashry </div>
             </div>
@@ -959,42 +1072,43 @@ def index():
             var dropZone = document.getElementById('dropZone');
             var fileInput = document.getElementById('excelFileInput');
             var fileNameDisplay = document.getElementById('fileNameDisplay');
-            var excelUploadForm = document.getElementById('excelUploadForm');
 
-            dropZone.addEventListener('click', function() {
-                fileInput.click();
-            });
+            if(dropZone && fileInput) {
+                dropZone.addEventListener('click', function() {
+                    fileInput.click();
+                });
 
-            fileInput.addEventListener('change', function(e) {
-                if (fileInput.files.length > 0) {
-                    fileNameDisplay.innerText = "الملف المختار: " + fileInput.files[0].name;
-                }
-            });
+                fileInput.addEventListener('change', function(e) {
+                    if (fileInput.files.length > 0) {
+                        fileNameDisplay.innerText = "الملف المختار: " + fileInput.files[0].name;
+                    }
+                });
 
-            ['dragenter', 'dragover'].forEach(eventName => {
-                dropZone.addEventListener(eventName, function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    dropZone.classList.add('dragover');
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dropZone.classList.add('dragover');
+                    }, false);
+                });
+
+                ['dragleave', 'drop'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dropZone.classList.remove('dragover');
+                    }, false);
+                });
+
+                dropZone.addEventListener('drop', function(e) {
+                    var dt = e.dataTransfer;
+                    var files = dt.files;
+                    if (files.length > 0) {
+                        fileInput.files = files;
+                        fileNameDisplay.innerText = "الملف المختار: " + files[0].name;
+                    }
                 }, false);
-            });
-
-            ['dragleave', 'drop'].forEach(eventName => {
-                dropZone.addEventListener(eventName, function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    dropZone.classList.remove('dragover');
-                }, false);
-            });
-
-            dropZone.addEventListener('drop', function(e) {
-                var dt = e.dataTransfer;
-                var files = dt.files;
-                if (files.length > 0) {
-                    fileInput.files = files;
-                    fileNameDisplay.innerText = "الملف المختار: " + files[0].name;
-                }
-            }, false);
+            }
 
             function changeProjectLayer() {
                 var selectedVal = document.getElementById('projectFilter').value;
@@ -1164,7 +1278,7 @@ def index():
 
                 group.items.forEach(function(item, idx) {
                     popupHtml += `<div style="background: #f8f9fa; padding: 6px; border-radius: 5px; margin-bottom: 6px; border: 1px solid #e1e1e1;">` +
-                                 `<div style="color: #e74c3c; font-weight: bold; font-size: 11px;"> / النقطة #${idx+1}</div>` +
+                                 `<div style="color: #e74c3c; font-weight: bold; font-size: 11px;">النقطة #${idx+1}</div>` +
                                  `<div style="margin: 3px 0; color: #2c3e50;"><b>الملاحظة:</b> ${item.note}</div>` +
                                  `<div style="color: #16a085; font-size: 11px; margin-bottom: 3px;">منطقة الإشراف: <b>${item.round_id || '-'}</b></div>`;
                     
@@ -1464,6 +1578,7 @@ def index():
       selected_shape_name=selected_shape_name,
       message=message,
       search_target=search_target,
+      chunks_list=chunks_list,
   )
 
 
