@@ -283,27 +283,29 @@ def enrich_locations_with_shape_data(locations, proj_id):
     if lat and lon:
       pt = Point(lon, lat)
       for gdf, proj_name in gdfs:
-        matched = gdf[gdf.contains(pt)]
-        if not matched.empty:
-          matched_project = proj_name
-          props = matched.iloc[0]
-          for col in props.index:
-            if any(
-                k in col.lower() for k in ['round_id', 'roundid', 'round']
-            ):
-              val = props[col]
-              if pd.notna(val) and str(val).strip() != '':
-                round_id_val = str(val)
-                break
-          if round_id_val == '-':
+        # استخدام الفهرس المكاني (sindex) للبحث السريع جداً
+        possible_matches_index = list(gdf.sindex.intersection(pt.bounds))
+        if possible_matches_index:
+          possible_matches = gdf.iloc[possible_matches_index]
+          matched = possible_matches[possible_matches.contains(pt)]
+          if not matched.empty:
+            matched_project = proj_name
+            props = matched.iloc[0]
             for col in props.index:
-              if any(k in col.lower() for k in ['id', 'name', 'title']):
+              if any(k in col.lower() for k in ['round_id', 'roundid', 'round']):
                 val = props[col]
                 if pd.notna(val) and str(val).strip() != '':
                   round_id_val = str(val)
                   break
-          if matched_project:
-            break
+            if round_id_val == '-':
+              for col in props.index:
+                if any(k in col.lower() for k in ['id', 'name', 'title']):
+                  val = props[col]
+                  if pd.notna(val) and str(val).strip() != '':
+                    round_id_val = str(val)
+                    break
+            if matched_project:
+              break
 
     loc['round_id'] = round_id_val
     if matched_project:
