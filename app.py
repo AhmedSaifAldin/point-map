@@ -1498,7 +1498,7 @@ def index():
                     container.innerHTML = `<label><input type="checkbox" id="chkNotes"> إظهار الملاحظات</label>` +
                                           `<label><input type="checkbox" id="chkShowSupervision" checked> إظهار مناطق الإشراف</label>` +
                                           `<label><input type="checkbox" id="chkHideSupervision"> إخفاء مناطق الإشراف</label>` +
-                                          `<label><input type="checkbox" id="chkShowSupNames"> إظهار أسامي مناطق الإشراف</label>`;
+                                          `<label><input type="checkbox" id="chkShowSupNames"> إظهار مسميات مناطق الإشراف</label>`;
                     L.DomEvent.disableClickPropagation(container);
                     setTimeout(function() {
                         document.getElementById('chkNotes').addEventListener('change', function(e) {
