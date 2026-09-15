@@ -25,9 +25,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 USERNAME = 'admin'
 PASSWORD = '123'
 
-CUSTOM_POINTS_FILE = os.path.join(UPLOAD_FOLDER, 'custom_points_temp.json')
-CHUNKS_FILE = os.path.join(UPLOAD_FOLDER, 'chunks_temp.json')
-
 
 def get_real_coordinates_from_url(short_url):
   if not short_url or 'http' not in short_url:
@@ -50,7 +47,7 @@ def get_real_coordinates_from_url(short_url):
   }
   try:
     response = requests.get(
-        short_url, headers=headers, allow_redirects=True, timeout=5
+        short_url, headers=headers, allow_redirects=True, timeout=3
     )
     final_url = response.url
 
@@ -62,20 +59,24 @@ def get_real_coordinates_from_url(short_url):
     if match_q_final:
       return float(match_q_final.group(1)), float(match_q_final.group(2))
 
-    match_body = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', response.text)
-    if match_body:
-      return float(match_body.group(1)), float(match_body.group(2))
-
   except Exception:
     pass
 
   return None, None
 
 
+def get_user_files():
+  token = session.get('user_token', 'default_guest')
+  points_file = os.path.join(UPLOAD_FOLDER, f'custom_points_{token}.json')
+  chunks_file = os.path.join(UPLOAD_FOLDER, f'chunks_{token}.json')
+  return points_file, chunks_file
+
+
 def load_custom_points():
-  if os.path.exists(CUSTOM_POINTS_FILE):
+  points_file, _ = get_user_files()
+  if os.path.exists(points_file):
     try:
-      with open(CUSTOM_POINTS_FILE, 'r', encoding='utf-8') as f:
+      with open(points_file, 'r', encoding='utf-8') as f:
         points = json.load(f)
         for p in points:
           if 'neighborhood' not in p:
@@ -103,9 +104,9 @@ def save_custom_point(
       'neighborhood': neighborhood,
       'extra_details': extra_details,
   })
-
+  points_file, _ = get_user_files()
   try:
-    with open(CUSTOM_POINTS_FILE, 'w', encoding='utf-8') as f:
+    with open(points_file, 'w', encoding='utf-8') as f:
       json.dump(points, f, ensure_ascii=False)
   except Exception:
     pass
@@ -114,18 +115,19 @@ def save_custom_point(
 def save_custom_points_bulk(new_points):
   points = load_custom_points()
   points.extend(new_points)
-
+  points_file, _ = get_user_files()
   try:
-    with open(CUSTOM_POINTS_FILE, 'w', encoding='utf-8') as f:
+    with open(points_file, 'w', encoding='utf-8') as f:
       json.dump(points, f, ensure_ascii=False)
   except Exception:
     pass
 
 
 def load_chunks():
-  if os.path.exists(CHUNKS_FILE):
+  _, chunks_file = get_user_files()
+  if os.path.exists(chunks_file):
     try:
-      with open(CHUNKS_FILE, 'r', encoding='utf-8') as f:
+      with open(chunks_file, 'r', encoding='utf-8') as f:
         return json.load(f)
     except Exception:
       return []
@@ -133,8 +135,9 @@ def load_chunks():
 
 
 def save_chunks(chunks):
+  _, chunks_file = get_user_files()
   try:
-    with open(CHUNKS_FILE, 'w', encoding='utf-8') as f:
+    with open(chunks_file, 'w', encoding='utf-8') as f:
       json.dump(chunks, f, ensure_ascii=False)
   except Exception:
     pass
@@ -203,8 +206,8 @@ def load_shapefile_as_geojson(proj_id):
                     'geometry': geom_json,
                     'properties': props,
                 })
-            except Exception:
-              pass
+            except Exception as e:
+              print(f'Error reading shp: {e}')
     if features_list:
       return {'type': 'FeatureCollection', 'features': features_list}
     return None
@@ -250,7 +253,7 @@ def load_shapefile_as_geojson(proj_id):
         })
       return {'type': 'FeatureCollection', 'features': features_list}
     except Exception as e:
-      print('Error loading shapefile:', e)
+      print('Error loading specific shapefile:', e)
   return None
 
 
@@ -303,28 +306,31 @@ def enrich_locations_with_shape_data(locations, proj_id):
     if lat and lon:
       pt = Point(lon, lat)
       for gdf, proj_name in gdfs:
-        possible_matches_index = list(gdf.sindex.intersection(pt.bounds))
-        if possible_matches_index:
-          possible_matches = gdf.iloc[possible_matches_index]
-          matched = possible_matches[possible_matches.contains(pt)]
-          if not matched.empty:
-            matched_project = proj_name
-            props = matched.iloc[0]
-            for col in props.index:
-              if any(k in col.lower() for k in ['round_id', 'roundid', 'round']):
-                val = props[col]
-                if pd.notna(val) and str(val).strip() != '':
-                  round_id_val = str(val)
-                  break
-            if round_id_val == '-':
+        try:
+          possible_matches_index = list(gdf.sindex.intersection(pt.bounds))
+          if possible_matches_index:
+            possible_matches = gdf.iloc[possible_matches_index]
+            matched = possible_matches[possible_matches.contains(pt)]
+            if not matched.empty:
+              matched_project = proj_name
+              props = matched.iloc[0]
               for col in props.index:
-                if any(k in col.lower() for k in ['id', 'name', 'title']):
+                if any(k in col.lower() for k in ['round_id', 'roundid', 'round']):
                   val = props[col]
                   if pd.notna(val) and str(val).strip() != '':
                     round_id_val = str(val)
                     break
-            if matched_project:
-              break
+              if round_id_val == '-':
+                for col in props.index:
+                  if any(k in col.lower() for k in ['id', 'name', 'title']):
+                    val = props[col]
+                    if pd.notna(val) and str(val).strip() != '':
+                      round_id_val = str(val)
+                      break
+              if matched_project:
+                break
+        except Exception:
+          pass
 
     loc['round_id'] = round_id_val
     if matched_project:
@@ -396,8 +402,10 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
       except Exception:
         pass
 
-    if (lat is None or lon is None) and url_col is not None and pd.notna(row[url_col]):
+    if url_col is not None and pd.notna(row[url_col]):
       maps_url = str(row[url_col]).strip()
+
+    if (lat is None or lon is None) and maps_url:
       if 'http' in maps_url or 'maps' in maps_url or 'goo.gl' in maps_url:
         lat, lon = get_real_coordinates_from_url(maps_url)
 
@@ -462,6 +470,8 @@ def login():
         and request.form['password'] == PASSWORD
     ):
       session['logged_in'] = True
+      if 'user_token' not in session:
+        session['user_token'] = str(uuid.uuid4())
       return redirect(url_for('index'))
     else:
       error = 'اسم المستخدم أو كلمة المرور غير صحيحة!'
@@ -511,6 +521,7 @@ def login():
 @app.route('/logout')
 def logout():
   session.pop('logged_in', None)
+  session.pop('user_token', None)
   return redirect(url_for('login'))
 
 
@@ -519,7 +530,8 @@ def clear_data():
   if not session.get('logged_in'):
     return redirect(url_for('login'))
 
-  for f_path in [CUSTOM_POINTS_FILE, CHUNKS_FILE]:
+  points_file, chunks_file = get_user_files()
+  for f_path in [points_file, chunks_file]:
     if os.path.exists(f_path):
       try:
         os.remove(f_path)
@@ -657,9 +669,10 @@ def index():
         message = f'تمت إضافة جميع المجموعات ({added_count}) إلى الخريطة بنجاح!'
 
     elif action == 'clear_chunks':
-      if os.path.exists(CHUNKS_FILE):
+      _, chunks_file = get_user_files()
+      if os.path.exists(chunks_file):
         try:
-          os.remove(CHUNKS_FILE)
+          os.remove(chunks_file)
         except Exception:
           pass
       message = 'تم مسح المجموعات المعالجة بنجاح.'
@@ -1080,7 +1093,7 @@ def index():
 
                 fileInput.addEventListener('change', function(e) {
                     if (fileInput.files.length > 0) {
-                        fileNameDisplay.innerText = "الملف المختار: " + fileInput.files[0].name;
+                        fileNameDisplay.innerText = "الملف المرفق: " + fileInput.files[0].name;
                     }
                 });
 
@@ -1242,7 +1255,7 @@ def index():
             var bounds = [];
 
             var allMarkersData = [];
-            var currentMarkersGroup = L.markerClusterGroup().addTo(map);
+            var currentMarkersGroup = L.layerGroup().addTo(map);
 
             function createPinIcon(count, isHighlighted = false) {
                 var badgeHtml = '';
@@ -1342,10 +1355,8 @@ def index():
                 var targetData = allMarkersData[currentPointIndex];
                 targetData.marker.setIcon(createPinIcon(targetData.count, true));
 
-                currentMarkersGroup.zoomToShowLayer(targetData.marker, function() {
-                    map.setView([targetData.lat, targetData.lon], 17, { animate: true });
-                    targetData.marker.openPopup();
-                });
+                map.setView([targetData.lat, targetData.lon], 17, { animate: true });
+                targetData.marker.openPopup();
             }
 
             if (totalPoints > 0) {
@@ -1496,6 +1507,7 @@ def index():
                 onAdd: function (map) {
                     var container = L.DomUtil.create('div', 'map-settings-box');
                     container.innerHTML = `<label><input type="checkbox" id="chkNotes"> إظهار الملاحظات</label>` +
+                                          `<label><input type="checkbox" id="chkGroupPoints" checked> تجميع النقاط في نفس المكان</label>` +
                                           `<label><input type="checkbox" id="chkShowSupervision" checked> إظهار مناطق الإشراف</label>` +
                                           `<label><input type="checkbox" id="chkHideSupervision"> إخفاء مناطق الإشراف</label>` +
                                           `<label><input type="checkbox" id="chkShowSupNames"> إظهار مسميات مناطق الإشراف</label>`;
@@ -1503,10 +1515,47 @@ def index():
                     setTimeout(function() {
                         document.getElementById('chkNotes').addEventListener('change', function(e) {
                             var show = e.target.checked;
-                            allMarkersData.forEach(function(item) {
-                                if (show) { item.marker.bindTooltip(item.tooltipText, { permanent: true, direction: 'top' }).openTooltip(); }
-                                else { item.marker.unbindTooltip(); item.marker.bindTooltip(item.tooltipText, { permanent: false, direction: 'top' }); }
+                            currentMarkersGroup.eachLayer(function(marker) {
+                                if (show) {
+                                    marker.openTooltip();
+                                } else {
+                                    marker.closeTooltip();
+                                }
                             });
+                        });
+
+                        document.getElementById('chkGroupPoints').addEventListener('change', function(e) {
+                            var groupEnabled = e.target.checked;
+                            currentMarkersGroup.clearLayers();
+                            allMarkersData.forEach(function(item) {
+                                if (!groupEnabled) {
+                                    item.items.forEach(function(subItem, sIdx) {
+                                        var offsetLat = item.lat + (sIdx * 0.00015);
+                                        var offsetLon = item.lon + (sIdx * 0.00015);
+
+                                        var singlePopup = `<div style="text-align: right; font-family: Tahoma; min-width: 220px;">` +
+                                                         `<b style="color: #2980b9;">المشروع: ${item.project}</b><br>` +
+                                                         `<b style="color: #e74c3c;">نقطة مفردة #${sIdx + 1}</b><br>` +
+                                                         `الملاحظة: ${subItem.note}<br>` +
+                                                         `منطقة الإشراف: ${subItem.round_id || '-'}` +
+                                                         `</div>`;
+
+                                        var singleMarker = L.marker([offsetLat, offsetLon], {
+                                            icon: createPinIcon(1, false)
+                                        });
+                                        singleMarker.bindPopup(singlePopup);
+                                        singleMarker.bindTooltip(subItem.note, { permanent: false, direction: 'top' });
+                                        currentMarkersGroup.addLayer(singleMarker);
+                                    });
+                                } else {
+                                    item.marker.setIcon(createPinIcon(item.count, false));
+                                    currentMarkersGroup.addLayer(item.marker);
+                                }
+                            });
+                            var showNotes = document.getElementById('chkNotes').checked;
+                            if (showNotes) {
+                                currentMarkersGroup.eachLayer(function(m) { m.openTooltip(); });
+                            }
                         });
 
                         var chkShowSup = document.getElementById('chkShowSupervision');
