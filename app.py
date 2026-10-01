@@ -1038,6 +1038,15 @@ def index():
             </div>
 
             <div>
+                <div class="card-section" style="border: 1px solid #2980b9; margin-bottom: 8px;">
+                    <div class="card-header-static" style="color: #2980b9;">⚙️ إعدادات التقرير</div>
+                    <div class="card-body-open" style="padding: 8px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>إدخل إسم التقرير:</label>
+                            <input type="text" id="reportTitleInput" placeholder="تقرير العمل الميداني..." value="تقرير الخريطة والبيانات">
+                        </div>
+                    </div>
+                </div>
                 <button type="button" id="downloadReportBtn" class="btn-download">تحميل تقرير الخريطة PDF 📄</button>
                 <div class="actions-bar">
                     <a href="/clear" class="btn-clear">مسح الخريطة</a>
@@ -1388,9 +1397,7 @@ def index():
                 }).then(function(canvas) {
                     var mapImgUrl = canvas.toDataURL('image/png');
 
-                    var projSelect = document.getElementById('projectFilter');
-                    var selectedProjName = projSelect.options[projSelect.selectedIndex].text.replace(/[🌐]/g, '').trim();
-                    
+                    var customReportTitle = document.getElementById('reportTitleInput').value.trim() || "تقرير الخريطة والبيانات";
                     var now = new Date();
                     var dateStr = now.toLocaleDateString('en-GB');
                     var timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -1398,7 +1405,7 @@ def index():
 
                     var fileDateStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
                     var fileTimeStr = String(now.getHours()).padStart(2, '0') + '-' + String(now.getMinutes()).padStart(2, '0');
-                    var fileName = `تقرير_${selectedProjName}_${fileDateStr}_${fileTimeStr}.pdf`;
+                    var fileName = `${customReportTitle}_${fileDateStr}_${fileTimeStr}.pdf`;
 
                     var allDynamicKeys = [];
                     allMarkersData.forEach(function(data) {
@@ -1429,7 +1436,52 @@ def index():
                         });
                     });
 
-                    var htmlContent = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير الخريطة والبيانات</title><style>
+                    // دالة لحساب المسافة التقريبية بين نقطتين (Haversine Formula) لترتيب النقاط بحسب الأقرب
+                    function calculateDistance(lat1, lon1, lat2, lon2) {
+                        var R = 6371; // نصف قطر الأرض بالكيلومتر
+                        var dLat = (lat2 - lat1) * Math.PI / 180;
+                        var dLon = (lon2 - lon1) * Math.PI / 180;
+                        var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                                Math.sin(dLon/2) * Math.sin(dLon/2);
+                        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                        return R * c;
+                    }
+
+                    // ترتيب النقاط بحسب الأقرب بدءاً من النقطة الأولى في القائمة، وترتيب مناطق الإشراف تصاعدياً
+                    if (allFlatItems.length > 0) {
+                        var sortedItems = [];
+                        var remaining = [].concat(allFlatItems);
+                        
+                        // اختيار أول نقطة كمرجع للبداء
+                        var currentRef = remaining.shift();
+                        sortedItems.push(currentRef);
+
+                        while (remaining.length > 0) {
+                            let nearestIdx = 0;
+                            let minDistance = Infinity;
+                            for (let i = 0; i < remaining.length; i++) {
+                                let dist = calculateDistance(currentRef.lat, currentRef.lon, remaining[i].lat, remaining[i].lon);
+                                if (dist < minDistance) {
+                                    minDistance = dist;
+                                    nearestIdx = i;
+                                }
+                            }
+                            currentRef = remaining.splice(nearestIdx, 1)[0];
+                            sortedItems.push(currentRef);
+                        }
+                        
+                        // إعادة الترتيب إضافياً حسب منطقة الإشراف لتنظيم الجدول بالترتيب المطلوب
+                        sortedItems.sort(function(a, b) {
+                            if (a.round_id < b.round_id) return -1;
+                            if (a.round_id > b.round_id) return 1;
+                            return 0;
+                        });
+
+                        allFlatItems = sortedItems;
+                    }
+
+                    var htmlContent = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>${customReportTitle}</title><style>
                         body { font-family: Tahoma, sans-serif; padding: 10px; background: #fff; color: #333; }
                         h1 { text-align: center; color: #2c3e50; font-size: 15px; margin-bottom: 2px; }
                         .report-meta { text-align: center; color: #7f8c8d; font-size: 10px; margin-bottom: 8px; direction: ltr; unicode-bidi: embed; }
@@ -1441,10 +1493,10 @@ def index():
                         tr:nth-child(even) { background-color: #f9f9f9; }
                         .map-btn { background-color: #27ae60; color: white !important; padding: 2px 6px; text-decoration: none; border-radius: 3px; font-weight: bold; display: inline-block; font-size: 8px; }
                     </style></head><body>
-                    <h1>تقرير المشروع: <span dir="ltr" style="unicode-bidi: embed;">${selectedProjName}</span></h1>
+                    <h1>${customReportTitle}</h1>
                     <div class="report-meta">${dateTimeFullStr}</div>
                     <div class="map-container-pdf"><img src="${mapImgUrl}" class="map-img"></div>
-                    <h2 style="font-size: 12px; margin: 8px 0 4px 0; color: #2c3e50;">جدول تفاصيل البيانات والمواقع</h2>
+                    <h2 style="font-size: 12px; margin: 8px 0 4px 0; color: #2c3e50;">جدول تفاصيل البيانات والمواقع (مرتبة حسب الأقرب ومنطقة الإشراف)</h2>
                     <table>
                         <thead><tr>
                             <th>م</th>
@@ -1632,5 +1684,5 @@ def index():
 
 
 if __name__ == '__main__':
-  port = int(os.environ.get('PORT', 5000))
+  port = int(os.environ.get('PORT', 80))
   app.run(host='0.0.0.0', port=port, debug=False)
