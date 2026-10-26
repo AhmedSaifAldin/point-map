@@ -77,7 +77,8 @@ h4{margin:14px 0 8px;font-size:13px}
 .pop button{border:0;border-radius:7px;padding:4px 9px;margin:3px 3px 0 0;cursor:pointer;background:var(--acc);color:#fff;font-size:11px}
 .pop button.d{background:var(--red)}
 .leaflet-container{font-family:'Cairo',sans-serif}
-@media(max-width:700px){.panel{width:auto;left:8px;right:8px;top:auto;height:55vh}#tools{left:50%;bottom:calc(55vh + 20px)}#pal{left:50%;bottom:calc(55vh + 92px)}}
+#credit{position:absolute;left:12px;bottom:12px;z-index:900;background:rgba(255,255,255,.9);color:var(--ink);font-size:12px;font-weight:600;padding:4px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.2);pointer-events:none;direction:ltr}
+@media(max-width:700px){.panel{width:auto;left:8px;right:8px;top:auto;height:55vh}#credit{bottom:calc(55vh + 20px)}#tools{left:50%;bottom:calc(55vh + 20px)}#pal{left:50%;bottom:calc(55vh + 92px)}}
 </style>
 </head>
 <body>
@@ -157,10 +158,10 @@ h4{margin:14px 0 8px;font-size:13px}
   <button class="btn" id="pdfBtn">تحميل التقرير PDF</button>
   <div class="row" style="margin-top:8px"><a class="btn s" style="text-align:center;text-decoration:none" href="/clear" onclick="return confirm('مسح كل النقاط؟')">مسح الخريطة</a><a class="btn s" style="text-align:center;text-decoration:none" href="/logout">خروج</a></div>
   <button class="btn d" id="clearAnno" style="margin-top:8px">مسح رسوماتي (نصوص وخطوط)</button>
-  <p style="text-align:center;font-size:11px;color:var(--mut)">Designed By Ahmed Saif Alashry</p>
  </div>
 </aside>
 
+<div id="credit">Designed By Ahmed Saif Alashry</div>
 <div id="pal">
  <label>الأيقونة</label><div class="ig" id="ig"></div>
  <label>اللون</label><div class="cg" id="cg"></div>
