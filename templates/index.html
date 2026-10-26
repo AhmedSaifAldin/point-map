@@ -1,263 +1,452 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <title>نظام إدارة ومتابعة المواقع والمشاريع</title>
-    <!-- استيراد خط Cairo العصري من جوجل -->
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
-    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;">
-    <link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
-    
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    
-    <style>
-        /* تطبيق خط Cairo على كامل النظام مع الحفاظ على التمرير والسكرول */
-        html, body { 
-            margin: 0; 
-            padding: 0; 
-            font-family: 'Cairo', sans-serif !important; 
-            height: 100vh; 
-            width: 100vw; 
-            overflow: hidden; 
-            display: flex; 
-            background: #f4f7f6; 
-        }
-        
-        /* باقي التنسيقات للقائمة الجانبية والكروت كما هي مع التمرير السلس */
-        .sidebar { 
-            width: 440px; 
-            height: 100vh; 
-            background: #fff; 
-            box-shadow: 2px 0 10px rgba(0,0,0,0.1); 
-            padding: 15px; 
-            box-sizing: border-box; 
-            z-index: 1000; 
-            display: flex; 
-            flex-direction: column; 
-            justify-content: space-between; 
-            overflow-y: auto; 
-        }
-        
-        h2 { color: #2c3e50; font-size: 18px; margin: 0 0 12px 0; text-align: center; font-weight: 700; }
-        
-        .card-section { background: #fdfdfd; border-radius: 8px; margin-bottom: 12px; border: 1px solid #dcdde1; box-shadow: 0 2px 5px rgba(0,0,0,0.03); overflow: hidden; }
-        .card-header-static { padding: 10px 12px; background: #f1f2f6; display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 13px; color: #34495e; border-bottom: 1px solid #dcdde1; }
-        .card-body-open { padding: 12px; background: #fff; }
-
-        .form-group { margin-bottom: 10px; }
-        label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 12px; color: #34495e; }
-        input[type="text"], select, input[type="file"] { width: 100%; padding: 8px 10px; border: 1px solid #bdc3c7; border-radius: 6px; box-sizing: border-box; font-size: 13px; background: #fff; font-family: 'Cairo', sans-serif; }
-        
-        button { background-color: #27ae60; color: white; border: none; padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; width: 100%; font-weight: 700; font-family: 'Cairo', sans-serif; transition: background 0.3s; margin-top: 5px; }
-        button:hover { background-color: #219653; }
-        .btn-group { display: flex; gap: 8px; margin-top: 5px; }
-        .btn-preview { background-color: #e67e22 !important; }
-        .btn-preview:hover { background-color: #d35400 !important; }
-        .btn-download { background-color: #2980b9 !important; padding: 10px; font-size: 13px; margin-top: 10px; font-family: 'Cairo', sans-serif; font-weight: 700; }
-        .btn-download:hover { background-color: #1f618d !important; }
-        
-        .actions-bar { display: flex; gap: 8px; margin-top: 8px; }
-        .btn-clear { background-color: #e74c3c !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: 700; font-size: 13px; box-sizing: border-box; flex: 1; transition: background 0.3s; }
-        .btn-clear:hover { background-color: #c0392b !important; }
-        .btn-logout { background-color: #7f8c8d !important; text-decoration: none; display: block; text-align: center; padding: 10px; border-radius: 6px; color: white; font-weight: 700; font-size: 13px; box-sizing: border-box; flex: 1; transition: background 0.3s; }
-        .btn-logout:hover { background-color: #707b7c !important; }
-        
-        .designer-credit { text-align: center; font-size: 11px; color: #7f8c8d; margin-top: 10px; font-weight: 700; }
-        .alert { background: #d4edda; color: #155724; padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-bottom: 10px; border-right: 4px solid #27ae60; font-weight: 600; }
-        
-        #map-container { flex-grow: 1; height: 100vh; width: calc(100vw - 440px); position: relative; display: flex; flex-direction: column; }
-        #map { flex-grow: 1; width: 100%; height: 100%; }
-
-        .map-settings-box {
-            background: white;
-            padding: 10px;
-            border-radius: 6px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            font-family: 'Cairo', sans-serif;
-            font-size: 12px;
-            min-width: 200px;
-            z-index: 1000;
-        }
-        .map-settings-box label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 6px;
-            cursor: pointer;
-            font-weight: 700;
-            color: #2c3e50;
-        }
-        .map-settings-box input[type="checkbox"] { cursor: pointer; width: 14px; height: 14px; }
-    </style>
-</head>س
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نظام إدارة الإحداثيات</title>
+<link rel="icon" href="{{ url_for('static', filename='icon.png') }}" type="image/png">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+:root{--ink:#14212b;--mut:#6b7c88;--line:#e3e9ec;--bg:#f6f8f7;--acc:#0f8b8d;--acc2:#0b6e70;--amb:#f2a541;--red:#d64545}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font-family:'Cairo',sans-serif;color:var(--ink);background:var(--bg)}
+button,input,select{font-family:inherit;font-size:13px}
+#map{position:absolute;inset:0}
+.panel{position:absolute;top:12px;right:12px;bottom:12px;width:370px;z-index:1000;background:rgba(255,255,255,.96);backdrop-filter:blur(8px);border-radius:16px;box-shadow:0 8px 30px rgba(20,33,43,.18);display:flex;flex-direction:column;overflow:hidden;transition:transform .25s}
+.panel.hide{transform:translateX(120%)}
+.ph{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+.ph b{font-size:16px}
+.tabs{display:flex;padding:6px;gap:4px;border-bottom:1px solid var(--line)}
+.tab{flex:1;border:0;background:none;padding:8px 4px;border-radius:9px;cursor:pointer;color:var(--mut);font-weight:600}
+.tab.on{background:var(--ink);color:#fff}
+.pane{display:none;padding:14px;overflow-y:auto;flex:1}.pane.on{display:block}
+label{display:block;font-size:12px;font-weight:600;color:var(--mut);margin:0 0 4px}
+input[type=text],input[type=number],select,input[type=file]{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:#fff;margin-bottom:10px}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.btn{border:0;border-radius:10px;padding:10px 14px;background:var(--acc);color:#fff;font-weight:700;cursor:pointer;width:100%}
+.btn:hover{background:var(--acc2)}.btn.s{background:#eef3f4;color:var(--ink)}.btn.s:hover{background:#e0e9eb}.btn.d{background:var(--red)}
+.row{display:flex;gap:8px}.row>*{flex:1}
+h4{margin:14px 0 8px;font-size:13px}
+.sep{border-top:1px solid var(--line);margin:14px 0}
+.item{display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;cursor:pointer}
+.item:hover{background:#eef3f4}
+.item .ic{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:#fff;flex:none}
+.item small{color:var(--mut);display:block}
+.item div:last-child{overflow:hidden}.item b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+.drop{border:2px dashed var(--acc);border-radius:12px;padding:18px;text-align:center;color:var(--acc2);cursor:pointer;margin-bottom:8px;font-weight:600}
+.drop.over{background:#e6f4f4}
+.nav{display:flex;align-items:center;justify-content:space-between;background:#eef3f4;border-radius:10px;padding:6px}
+.nav button{width:36px;height:32px;border:0;border-radius:8px;background:#fff;cursor:pointer}
+.chunk{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:8px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;font-size:12px}
+.chunk .btn{width:auto;padding:6px 10px}
+.chunk .ok{color:var(--acc2)}.chunk .wait{color:#b97a1e}
+.colrow{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:12px}
+.toggle{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px;cursor:pointer;color:var(--ink)}
+#toast{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:1200;background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;max-width:70vw}
+#tools{position:absolute;bottom:20px;left:calc(50% - 185px);transform:translateX(-50%);z-index:1000;background:#fff;border-radius:16px;padding:6px;display:flex;gap:4px;box-shadow:0 8px 30px rgba(20,33,43,.2)}
+.tl{border:0;background:none;border-radius:11px;padding:7px 12px;cursor:pointer;font-weight:600;color:var(--ink);display:flex;flex-direction:column;align-items:center;gap:0;min-width:58px}
+.tl span{font-size:18px;line-height:1.3}.tl small{font-size:11px}
+.tl:hover{background:#eef3f4}.tl.on{background:var(--acc);color:#fff}
+#pal{position:absolute;bottom:92px;left:calc(50% - 185px);transform:translateX(-50%);z-index:1000;background:#fff;border-radius:14px;padding:10px;width:290px;box-shadow:0 8px 30px rgba(20,33,43,.2);display:none}
+#pal.open{display:block}
+.ig{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin-bottom:8px}
+.ig button{border:0;background:none;font-size:19px;border-radius:8px;cursor:pointer;padding:3px}
+.ig button.on{background:#d7eeee;outline:2px solid var(--acc)}
+.cg{display:flex;gap:6px;align-items:center}
+.cg button{width:22px;height:22px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+.cg button.on{box-shadow:0 0 0 2px var(--ink)}
+#tog{position:absolute;top:12px;right:12px;z-index:999;width:42px;height:42px;border:0;border-radius:12px;background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.2);cursor:pointer;font-size:18px;display:none}
+.pin{width:34px;height:34px;background:var(--c);border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;border:2.5px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.35)}
+.pin span{transform:rotate(45deg);font-size:16px;line-height:1}
+.pin.hl{animation:bob .9s ease-in-out infinite alternate}
+@keyframes bob{to{transform:rotate(-45deg) translate(3px,-3px) scale(1.12)}}
+.bd{position:absolute;top:-8px;left:-8px;transform:rotate(45deg);background:var(--ink);color:#fff;border-radius:9px;font-size:10px;min-width:17px;height:17px;display:grid;place-items:center;padding:0 3px}
+.dl{background:#fff;border:1.5px solid var(--acc);color:var(--acc2);border-radius:8px;padding:1px 7px;font-weight:700;font-size:11px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.2);width:max-content}
+.tx{background:rgba(20,33,43,.88);color:#fff;border-radius:8px;padding:3px 10px;font-weight:700;font-size:13px;white-space:nowrap;width:max-content}
+.pop{min-width:200px;font-family:'Cairo',sans-serif}
+.pop b.h{display:block;border-bottom:2px solid var(--acc);padding-bottom:4px;margin-bottom:6px}
+.pop .it{background:#f3f7f7;border-radius:8px;padding:6px 8px;margin-bottom:5px;font-size:12px}
+.pop .it i{display:block;font-style:normal;color:var(--mut);font-size:11px}
+.pop button{border:0;border-radius:7px;padding:4px 9px;margin:3px 3px 0 0;cursor:pointer;background:var(--acc);color:#fff;font-size:11px}
+.pop button.d{background:var(--red)}
+.leaflet-container{font-family:'Cairo',sans-serif}
+@media(max-width:700px){.panel{width:auto;left:8px;right:8px;top:auto;height:55vh}#tools{left:50%;bottom:calc(55vh + 20px)}#pal{left:50%;bottom:calc(55vh + 92px)}}
+</style>
+</head>
 <body>
-    <div class="sidebar">
-        <h2>إدارة الإحداثيات والبيانات</h2>
+<div id="map"></div>
+{% if message %}<div id="toast">{{ message }}</div>{% endif %}
+<button id="tog" title="فتح اللوحة">☰</button>
 
-        {% if message %}
-            <div class="alert">{{ message }}</div>
-        {% endif %}
+<aside class="panel" id="panel">
+ <div class="ph"><b>إدارة الإحداثيات</b><button class="btn s" style="width:auto;padding:5px 10px" id="hidePanel">إخفاء</button></div>
+ <div class="tabs">
+  <button class="tab on" data-t="p1">النقاط</button><button class="tab" data-t="p2">إضافة</button>
+  <button class="tab" data-t="p3">الملفات</button><button class="tab" data-t="p4">الإعدادات</button>
+ </div>
 
-        <div class="form-section" style="border: 2px solid #2c3e50; background: #eab30815;">
-            <h3 style="color: #2c3e50;">تصفية المشروع</h3>
-            <div class="form-group" style="margin-bottom:0;">
-                <label>اختر المشروع:</label>
-                <select id="projectFilter" onchange="changeProjectLayer()">
-                    <option value="ALL">🌐 كل المشاريع والمناطق</option>
-                    {% for shape in available_shapes %}
-                        <option value="{{ shape.id }}" {% if selected_shape_project == shape.id %}selected{% endif %}>{{ shape.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
+ <div class="pane on" id="p1">
+  <label>المشروع</label>
+  <select id="projectFilter">
+   <option value="ALL">كل المشاريع والمناطق</option>
+   {% for s in available_shapes %}<option value="{{ s.id }}" {% if selected_shape_project == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+  </select>
+  <div class="nav"><button id="nx" title="التالية">▶</button><b id="cnt" style="font-size:13px">0 من 0</b><button id="pv" title="السابقة">◀</button></div>
+  <button class="btn s" id="routeBtn" style="margin-top:8px">ربط النقاط بخطوط وإظهار المسافات</button>
+  <div id="routeInfo" style="font-size:12px;color:var(--mut);margin:6px 2px"></div>
+  <h4>قائمة النقاط</h4>
+  <div id="list"></div>
+ </div>
 
-        <div class="form-section">
-            <h3>📍 إضافة نقطة يدوية</h3>
-            <form method="POST">
-                <input type="hidden" name="action" value="add_point">
-                <div class="form-group">
-                    <label>اسم المشروع:</label>
-                    <input type="text" name="project_name" placeholder="اسم المشروع" required value="مشروع تجريبي">
-                </div>
-                <div class="form-group">
-                    <label>خط الطول (Lat):</label>
-                    <input type="text" name="new_lat" placeholder="مثال: 24.7136" required>
-                </div>
-                <div class="form-group">
-                    <label>خط العرض (Lon):</label>
-                    <input type="text" name="new_lon" placeholder="مثال: 46.6753" required>
-                </div>
-                <div class="form-group">
-                    <label>الملاحظات:</label>
-                    <input type="text" name="new_note" placeholder="اكتب الملاحظات..." required>
-                </div>
-                <button type="submit" style="margin-top:0;">إضافة النقطة مباشرة</button>
-            </form>
-        </div>
+ <div class="pane" id="p2">
+  <h4 style="margin-top:0">من رابط خرائط</h4>
+  <form method="POST">
+   <label>اسم المشروع</label><input type="text" name="project_name" placeholder="اسم المشروع">
+   <label>رابط الموقع</label><input type="text" name="maps_url" placeholder="https://maps.app.goo.gl/..." required>
+   <label>ملاحظة</label><input type="text" name="maps_note" placeholder="تفاصيل الموقع">
+   <div class="row"><button class="btn" name="action" value="search_map_url">حفظ</button><button class="btn s" name="action" value="preview_map_url">استعراض</button></div>
+  </form>
+  <div class="sep"></div>
+  <h4 style="margin-top:0">من إحداثيات</h4>
+  <form method="POST">
+   <label>اسم المشروع</label><input type="text" name="project_name" placeholder="اسم المشروع">
+   <div class="row"><div><label>Lat</label><input type="text" name="coord_lat" placeholder="24.7136" required></div><div><label>Lon</label><input type="text" name="coord_lon" placeholder="46.6753" required></div></div>
+   <label>ملاحظة</label><input type="text" name="coord_note" placeholder="تفاصيل الموقع" required>
+   <div class="row"><button class="btn" name="action" value="search_coords_save">حفظ</button><button class="btn s" name="action" value="search_coords_preview">استعراض</button></div>
+  </form>
+ </div>
 
-        <div class="form-section" style="background: #fff; border: 2px solid #27ae60;">
-            <h3 style="color: #27ae60;">📥 إنسرت كشوف الاكسل</h3>
-            <form method="POST" enctype="multipart/form-data">
-                <input type="hidden" name="action" value="upload_coords">
-                <div class="form-group">
-                    <label>ملف كشف الإحداثيات (Excel / CSV):</label>
-                    <input type="file" name="excelFile" accept=".xlsx, .xls, .csv" required>
-                </div>
-                <button type="submit" style="background-color: #27ae60; margin-top: 0;">رفع واستيراد البيانات 🗺️</button>
-            </form>
-        </div>
+ <div class="pane" id="p3">
+  <form id="upForm" method="POST" enctype="multipart/form-data">
+   <input type="hidden" name="action" value="upload_coords">
+   <div class="drop" id="drop">اسحب ملف Excel أو CSV هنا<br><small>أو اضغط للاختيار</small></div>
+   <input type="file" id="fileIn" name="excelFile" accept=".xlsx,.xls,.csv" required style="display:none">
+   <div id="fname" style="font-size:12px;color:var(--acc2);font-weight:700;text-align:center;margin-bottom:8px"></div>
+   <label>عدد النقاط في كل مجموعة</label><input type="number" name="chunk_size" value="200" min="1">
+   <button class="btn">معالجة الملف</button>
+  </form>
+  {% if chunks_list %}
+  <div class="sep"></div>
+  <div class="row" style="margin-bottom:8px">
+   <form method="POST"><input type="hidden" name="action" value="add_all_chunks"><button class="btn">إضافة الكل للخريطة</button></form>
+   <form method="POST"><input type="hidden" name="action" value="clear_chunks"><button class="btn s">مسح المجموعات</button></form>
+  </div>
+  {% for c in chunks_list %}
+  <div class="chunk"><div><b>{{ c.name }}</b><br><span class="{% if c.added %}ok{% else %}wait{% endif %}">{% if c.added %}تمت الإضافة{% else %}بانتظار الإضافة{% endif %}</span></div>
+   {% if not c.added %}<form method="POST" style="margin:0"><input type="hidden" name="action" value="add_chunk_to_map"><input type="hidden" name="chunk_id" value="{{ c.id }}"><button class="btn">إضافة</button></form>{% endif %}
+  </div>
+  {% endfor %}{% endif %}
+ </div>
 
-        <button type="button" id="downloadReportBtn" class="btn-download">تحميل تقرير الخريطة PDF 📄</button>
-        <a href="/clear" class="btn-clear">مسح الخريطة وتفريغ البيانات 🗑️</a>
-        
-        <div class="designer-credit"> Designed By Ahmed Saif Alashry </div>
-    </div>
-    
-    <div id="map-container">
-        <div id="map"></div>
-    </div>
+ <div class="pane" id="p4">
+  <h4 style="margin-top:0">عرض الخريطة</h4>
+  <label class="toggle"><input type="checkbox" id="cCluster" checked> تجميع النقاط المتقاربة</label>
+  <label class="toggle"><input type="checkbox" id="cNotes"> إظهار الملاحظات فوق النقاط</label>
+  <label class="toggle"><input type="checkbox" id="cZones" checked> إظهار مناطق الإشراف</label>
+  <label class="toggle"><input type="checkbox" id="cZN"> إظهار أسماء المناطق</label>
+  <h4>ألوان الطبقات</h4><div id="colors"></div>
+  <div class="sep"></div>
+  <label>اسم التقرير</label><input type="text" id="repTitle" value="تقرير الخريطة والبيانات">
+  <button class="btn" id="pdfBtn">تحميل التقرير PDF</button>
+  <div class="row" style="margin-top:8px"><a class="btn s" style="text-align:center;text-decoration:none" href="/clear" onclick="return confirm('مسح كل النقاط؟')">مسح الخريطة</a><a class="btn s" style="text-align:center;text-decoration:none" href="/logout">خروج</a></div>
+  <button class="btn d" id="clearAnno" style="margin-top:8px">مسح رسوماتي (نصوص وخطوط)</button>
+  <p style="text-align:center;font-size:11px;color:var(--mut)">Designed By Ahmed Saif Alashry</p>
+ </div>
+</aside>
 
-    <div id="server-data" 
-         data-shape='{{ shape_geojson | tojson | safe if shape_geojson else "" }}'
-         data-locations='{{ grouped_locations | tojson | safe if grouped_locations else "[]" }}'
-         style="display: none;">
-    </div>
+<div id="pal">
+ <label>الأيقونة</label><div class="ig" id="ig"></div>
+ <label>اللون</label><div class="cg" id="cg"></div>
+</div>
+<div id="tools">
+ <button class="tl on" data-m="none"><span>🖐</span><small>تنقل</small></button>
+ <button class="tl" data-m="marker"><span>📍</span><small>نقطة</small></button>
+ <button class="tl" data-m="text"><span>🔤</span><small>نص</small></button>
+ <button class="tl" data-m="measure"><span>📏</span><small>قياس</small></button>
+ <button class="tl" id="finish" style="display:none"><span>✔</span><small>إنهاء</small></button>
+ <button class="tl" id="palBtn"><span>🎨</span><small>أيقونات</small></button>
+</div>
 
-    <script>
-        var map = L.map('map').setView([24.7136, 46.6753], 12);
+<div id="srv" hidden data-g='{{ grouped_locations | tojson }}' data-shapes='{{ shape_geojson | tojson }}' data-av='{{ available_shapes | tojson }}' data-st='{{ search_target | tojson }}'></div>
 
-        var satelliteBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles © Esri',
-            maxZoom: 19
-        });
-        var streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
-        }).addTo(map);
+<script>
+var SRV = document.getElementById('srv').dataset;
+var G = JSON.parse(SRV.g);
+var SHAPES = JSON.parse(SRV.shapes);
+var AV = JSON.parse(SRV.av);
+var ST = JSON.parse(SRV.st);
 
-        L.control.layers({
-            "خريطة الشوارع العادية": streetLayer,
-            "قمر صناعي": satelliteBase
-        }).addTo(map);
+function store(k, v){ try{ if(v===undefined) return JSON.parse(localStorage.getItem(k)||'null'); localStorage.setItem(k, JSON.stringify(v)); }catch(e){ return null; } }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function fmt(m){ return m < 1000 ? Math.round(m)+' م' : (m/1000).toFixed(2)+' كم'; }
 
-        function changeProjectLayer() {
-            var selectedVal = document.getElementById('projectFilter').value;
-            window.location.href = "/?shape_proj=" + encodeURIComponent(selectedVal);
-        }
+var ICONS = ['📍','🏠','🏢','🏗️','⚠️','🚧','⛽','🅿️','🏥','🕌','🏫','🛒','🚗','⭐','🔧','📷','🚩','💧','⚡','🌳'];
+var COLORS = ['#0f8b8d','#d64545','#f2a541','#3b6fd4','#7a4fc9','#2e9e5b','#e0568a','#14212b'];
+var cur = { icon:'📍', color:'#0f8b8d' };
 
-        var serverDataEl = document.getElementById('server-data');
-        var groupedLocations = JSON.parse(serverDataEl.getAttribute('data-locations') || '[]');
-        var shapeGeojson = serverDataEl.getAttribute('data-shape') ? JSON.parse(serverDataEl.getAttribute('data-shape')) : null;
+/* ---------- map ---------- */
+var map = L.map('map', { zoomControl:false }).setView([24.7136, 46.6753], 12);
+L.control.zoom({ position:'topleft' }).addTo(map);
+var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19, crossOrigin:true }).addTo(map);
+var sat = L.layerGroup([
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, crossOrigin:true }),
+  L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, crossOrigin:true })
+]);
+L.control.layers({ 'خريطة الشوارع': street, 'قمر صناعي': sat }, null, { position:'topleft' }).addTo(map);
+setTimeout(function(){ map.invalidateSize(); }, 400);
 
-        var allMarkersData = [];
-        var currentMarkersGroup = L.layerGroup().addTo(map);
-        var shapeLayer = null;
-        var shapeLabelsGroup = L.layerGroup();
+function pin(icon, color, hl, count){
+  var b = count > 1 ? '<div class="bd">'+count+'</div>' : '';
+  return L.divIcon({ className:'', iconSize:[34,40], iconAnchor:[17,38], popupAnchor:[0,-36],
+    html:'<div class="pin'+(hl?' hl':'')+'" style="--c:'+color+'"><span>'+icon+'</span></div>'+b });
+}
+function label(cls, html, pos){ return L.marker(pos, { interactive:false, icon:L.divIcon({ className:'', html:'<div class="'+cls+'">'+html+'</div>', iconSize:[0,0] }) }); }
 
-        if (shapeGeojson) {
-            shapeLayer = L.geoJSON(shapeGeojson, {
-                style: { color: "#e74c3c", weight: 3, fillColor: "#3498db", fillOpacity: 0.3 }
-            }).addTo(map);
-            shapeLabelsGroup.addTo(map);
-            try { map.fitBounds(shapeLayer.getBounds()); } catch(e) {}
-        }
+/* ---------- shapes ---------- */
+var shapeLayer = null, zoneLabels = L.layerGroup(), shapeItems = [];
+var defCols = ['#d64545','#3b6fd4','#2e9e5b','#f2a541','#7a4fc9','#0f8b8d','#e0568a','#14212b'];
+var lc = store('layerColors') || {}, cmap = {}, projs = [];
+AV.forEach(function(s){ if(projs.indexOf(s.name)<0) projs.push(s.name); });
+if(SHAPES) SHAPES.features.forEach(function(f){ var n=f.properties.parent_project_name||' '; if(projs.indexOf(n)<0) projs.push(n); });
+projs.forEach(function(p,i){ cmap[p] = lc[p] || defCols[i % defCols.length]; });
 
-        var bounds = [];
-        groupedLocations.forEach(function(group) {
-            var popupHtml = '<div style="text-align: right; font-family: Tahoma;"><b>مشروع: ' + group.project + '</b><br>الإحداثيات: ' + group.lat + ', ' + group.lon + '<br>عدد النقاط: ' + group.count + '</div>';
-            
-            var marker = L.marker([group.lat, group.lon]).addTo(currentMarkersGroup);
-            marker.bindPopup(popupHtml);
-            
-            var primaryNote = group.items[0] ? group.items[0].note : '';
-            marker.bindTooltip(primaryNote, { permanent: false, direction: 'top' });
+if(SHAPES){
+  shapeLayer = L.geoJSON(SHAPES, {
+    style: function(f){ var c = cmap[f.properties.parent_project_name||' ']; return { color:c, weight:2.5, fillColor:c, fillOpacity:.22 }; },
+    onEachFeature: function(f, l){
+      var p = f.properties, pn = p.parent_project_name || ' ';
+      shapeItems.push({ layer:l, project:pn });
+      var rid = p.Round_ID || p.ROUND_ID || p.round_id || p.Name || p.NAME || p.name || p.Title || p.title || p.ID || Object.values(p)[0] || '-';
+      try{ zoneLabels.addLayer(label('tx', esc(rid), l.getBounds().getCenter())); }catch(e){}
+      var h = '<div class="pop"><b class="h">منطقة الإشراف: '+esc(rid)+'</b><div class="it">المشروع: <b>'+esc(pn)+'</b></div>';
+      for(var k in p){ if(k!=='parent_project_name') h += '<div class="it"><i>'+esc(k)+'</i>'+esc(p[k])+'</div>'; }
+      l.bindPopup(h+'</div>');
+    }
+  }).addTo(map);
+}
+var cbox = document.getElementById('colors');
+cbox.innerHTML = projs.length ? projs.map(function(p){
+  return '<div class="colrow"><span>'+esc(p)+'</span><input type="color" data-p="'+esc(p)+'" value="'+cmap[p]+'"></div>';
+}).join('') : '<small style="color:var(--mut)">لا توجد طبقات</small>';
+cbox.addEventListener('input', function(e){
+  var p = e.target.getAttribute('data-p'); if(!p) return;
+  cmap[p] = lc[p] = e.target.value; store('layerColors', lc);
+  shapeItems.forEach(function(s){ if(s.project===p) s.layer.setStyle({ color:cmap[p], fillColor:cmap[p] }); });
+});
 
-            allMarkersData.push({
-                marker: marker,
-                tooltipText: primaryNote
-            });
-            bounds.push([group.lat, group.lon]);
-        });
+/* ---------- survey points ---------- */
+var pstyle = store('pstyle') || {};
+var cluster = L.markerClusterGroup({ disableClusteringAtZoom:17, maxClusterRadius:50 }).addTo(map);
+var plain = L.layerGroup();
+var pts = [], bounds = [];
 
-        if (bounds.length > 0) {
-            map.fitBounds(bounds);
-        }
+function key(g){ return g.lat+','+g.lon; }
+function pointPopup(g, i){
+  var h = '<div class="pop"><b class="h">'+esc(g.project)+'</b>';
+  g.items.forEach(function(it, n){
+    h += '<div class="it"><b>'+esc(it.note)+'</b><i>منطقة الإشراف: '+esc(it.round_id||'-')+'</i>';
+    for(var k in (it.extra_details||{})) h += '<i>'+esc(k)+': '+esc(it.extra_details[k])+'</i>';
+    if(it.url && it.url!=='#') h += '<a href="'+esc(it.url)+'" target="_blank">فتح في جوجل</a>';
+    h += '</div>';
+  });
+  return h + '<i style="font-size:11px;color:#6b7c88">'+g.lat.toFixed(5)+', '+g.lon.toFixed(5)+'</i><br><button onclick="styleServerPt('+i+')">استخدم الأيقونة المختارة</button></div>';
+}
+G.forEach(function(g, i){
+  var s = pstyle[key(g)] || { icon:'📍', color:'#8e44ad' };
+  var m = L.marker([g.lat, g.lon], { icon:pin(s.icon, s.color, false, g.count) });
+  m.bindPopup(function(){ return pointPopup(g, i); });
+  m.bindTooltip(g.count===1 ? g.items[0].note : 'مواقع متعددة ('+g.count+')', { direction:'top', offset:[0,-34] });
+  cluster.addLayer(m);
+  pts.push({ m:m, g:g, s:s });
+  bounds.push([g.lat, g.lon]);
+});
+function styleServerPt(i){
+  var p = pts[i]; p.s = { icon:cur.icon, color:cur.color };
+  pstyle[key(p.g)] = p.s; store('pstyle', pstyle);
+  p.m.setIcon(pin(p.s.icon, p.s.color, false, p.g.count)); renderList();
+}
 
-        var SettingsControl = L.Control.extend({
-            options: { position: 'topright' },
-            onAdd: function (map) {
-                var container = L.DomUtil.create('div', 'map-settings-box');
-                container.innerHTML = '<label><input type="checkbox" id="chkNotes"> إظهار الملاحظات</label>' +
-                                      '<label><input type="checkbox" id="chkShowSupervision" checked> إظهار مناطق الإشراف</label>' +
-                                      '<label><input type="checkbox" id="chkHideSupervision"> إخفاء مناطق الإشراف</label>' +
-                                      '<label><input type="checkbox" id="chkShowSupNames" checked> إظهار أسامي مناطق الإشراف</label>';
-                L.DomEvent.disableClickPropagation(container);
-                
-                setTimeout(function() {
-                    var chkNotes = document.getElementById('chkNotes');
-                    if (chkNotes) {
-                        chkNotes.addEventListener('change', function(e) {
-                            var show = e.target.checked;
-                            allMarkersData.forEach(function(item) {
-                                if (show) { item.marker.bindTooltip(item.tooltipText, { permanent: true, direction: 'top' }).openTooltip(); }
-                                else { item.marker.unbindTooltip(); item.marker.bindTooltip(item.tooltipText, { permanent: false, direction: 'top' }); }
-                            });
-                        });
-                    }
-                }, 100);
-                
-                return container;
-            }
-        });
-        map.addControl(new SettingsControl());
+/* list + navigator */
+var idx = 0;
+function renderList(){
+  var box = document.getElementById('list');
+  if(!pts.length){ box.innerHTML = '<small style="color:var(--mut)">لا توجد نقاط بعد. أضف نقطة أو ارفع ملفاً.</small>'; return; }
+  box.innerHTML = pts.slice(0, 400).map(function(p, i){
+    return '<div class="item" data-i="'+i+'"><div class="ic" style="background:'+p.s.color+'">'+p.s.icon+'</div><div><b>'+esc(p.g.items[0].note)+'</b><small>'+esc(p.g.project)+' · '+esc(p.g.items[0].round_id||'-')+'</small></div></div>';
+  }).join('');
+}
+document.getElementById('list').addEventListener('click', function(e){
+  var it = e.target.closest('.item'); if(it) goTo(+it.getAttribute('data-i'));
+});
+function goTo(i){
+  if(!pts.length) return;
+  idx = (i + pts.length) % pts.length;
+  var p = pts[idx];
+  pts.forEach(function(q){ q.m.setIcon(pin(q.s.icon, q.s.color, false, q.g.count)); });
+  p.m.setIcon(pin(p.s.icon, p.s.color, true, p.g.count));
+  document.getElementById('cnt').textContent = (idx+1)+' من '+pts.length;
+  map.setView([p.g.lat, p.g.lon], 17);
+  if(!cluster.hasLayer(p.m) && !map.hasLayer(plain)) return;
+  p.m.openPopup();
+}
+document.getElementById('nx').onclick = function(){ goTo(idx+1); };
+document.getElementById('pv').onclick = function(){ goTo(idx-1); };
+document.getElementById('cnt').textContent = '0 من '+pts.length;
+renderList();
 
-        document.getElementById('downloadReportBtn').addEventListener('click', function() {
-            window.print();
-        });
-    </script>
+/* route through all points with distances */
+var routeLayer = L.layerGroup(), routeOn = false;
+function drawPath(ll, group, color){
+  L.polyline(ll, { color:color, weight:4, opacity:.9, dashArray:'1,8', lineCap:'round' }).addTo(group);
+  var total = 0;
+  for(var i=1; i<ll.length; i++){
+    var d = map.distance(ll[i-1], ll[i]); total += d;
+    label('dl', fmt(d), [(ll[i-1][0]+ll[i][0])/2, (ll[i-1][1]+ll[i][1])/2]).addTo(group);
+  }
+  return total;
+}
+document.getElementById('routeBtn').onclick = function(){
+  routeOn = !routeOn; routeLayer.clearLayers();
+  var info = document.getElementById('routeInfo');
+  if(!routeOn){ map.removeLayer(routeLayer); info.textContent=''; this.textContent='ربط النقاط بخطوط وإظهار المسافات'; return; }
+  if(pts.length < 2){ info.textContent='تحتاج نقطتين على الأقل.'; routeOn=false; return; }
+  if(pts.length > 60 && !confirm('عدد النقاط كبير، سيظهر ازدحام في المسافات. متابعة؟')){ routeOn=false; return; }
+  var total = drawPath(pts.map(function(p){ return [p.g.lat, p.g.lon]; }), routeLayer, '#f2a541');
+  routeLayer.addTo(map);
+  info.textContent = 'المسافة الإجمالية بالترتيب الحالي: '+fmt(total);
+  this.textContent = 'إخفاء الخطوط';
+};
+
+/* ---------- my drawings: markers, text, measured lines ---------- */
+var anno = store('anno') || [], annoGroup = L.layerGroup().addTo(map);
+function saveAnno(){ store('anno', anno); }
+function delAnno(i){ anno.splice(i,1); saveAnno(); drawAnno(); }
+function drawAnno(){
+  annoGroup.clearLayers();
+  anno.forEach(function(a, i){
+    if(a.t === 'line'){
+      var total = drawPath(a.pts, annoGroup, a.color);
+      var end = a.pts[a.pts.length-1];
+      L.marker(end, { icon:L.divIcon({ className:'', html:'<div class="dl" style="background:var(--ink);color:#fff;border-color:var(--ink);cursor:pointer" onclick="delAnno('+i+')" title="اضغط للحذف">المجموع '+fmt(total)+' ✕</div>', iconSize:[0,0] }) }).addTo(annoGroup);
+    } else {
+      var m = L.marker([a.lat, a.lon], { draggable:true, icon: a.t==='text' ? L.divIcon({ className:'', html:'<div class="tx" style="background:'+a.color+'">'+esc(a.text)+'</div>', iconSize:[0,0] }) : pin(a.icon, a.color, false, 1) });
+      m.on('dragend', function(){ var p=m.getLatLng(); a.lat=p.lat; a.lon=p.lng; saveAnno(); });
+      m.bindPopup('<div class="pop"><b class="h">'+esc(a.text||'')+'</b><i style="font-size:11px;color:#6b7c88">'+a.lat.toFixed(5)+', '+a.lon.toFixed(5)+'</i><br><button class="d" onclick="delAnno('+i+')">حذف</button></div>');
+      m.addTo(annoGroup);
+    }
+  });
+}
+drawAnno();
+
+/* tools */
+var mode = 'none', draft = [], draftGroup = L.layerGroup().addTo(map);
+function setMode(m){
+  mode = m; draft = []; draftGroup.clearLayers();
+  document.querySelectorAll('.tl[data-m]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-m')===m); });
+  document.getElementById('finish').style.display = m==='measure' ? 'flex' : 'none';
+  map.getContainer().style.cursor = m==='none' ? '' : 'crosshair';
+}
+document.querySelectorAll('.tl[data-m]').forEach(function(b){ b.onclick = function(){ setMode(b.getAttribute('data-m')); }; });
+document.getElementById('finish').onclick = finishLine;
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') setMode('none'); if(e.key==='Enter' && mode==='measure') finishLine(); });
+function finishLine(){
+  if(draft.length >= 2){ anno.push({ t:'line', pts:draft.slice(), color:cur.color }); saveAnno(); drawAnno(); }
+  setMode('none');
+}
+map.on('click', function(e){
+  var ll = [e.latlng.lat, e.latlng.lng];
+  if(mode === 'marker'){
+    var t = prompt('اسم النقطة:', ''); if(t === null) return;
+    anno.push({ t:'marker', lat:ll[0], lon:ll[1], text:t, icon:cur.icon, color:cur.color }); saveAnno(); drawAnno();
+  } else if(mode === 'text'){
+    var tx = prompt('اكتب النص:', ''); if(!tx) return;
+    anno.push({ t:'text', lat:ll[0], lon:ll[1], text:tx, color:cur.color==='#f2a541' ? '#b97a1e' : cur.color }); saveAnno(); drawAnno();
+  } else if(mode === 'measure'){
+    draft.push(ll); draftGroup.clearLayers();
+    drawPath(draft, draftGroup, cur.color);
+    draft.forEach(function(p){ L.circleMarker(p, { radius:5, color:'#fff', weight:2, fillColor:cur.color, fillOpacity:1 }).addTo(draftGroup); });
+  }
+});
+document.getElementById('clearAnno').onclick = function(){ if(confirm('حذف كل النصوص والخطوط والنقاط التي رسمتها؟')){ anno=[]; saveAnno(); drawAnno(); } };
+
+/* icon + color palette */
+var ig = document.getElementById('ig'), cg = document.getElementById('cg');
+ig.innerHTML = ICONS.map(function(c){ return '<button data-i="'+c+'" class="'+(c===cur.icon?'on':'')+'">'+c+'</button>'; }).join('');
+cg.innerHTML = COLORS.map(function(c){ return '<button data-c="'+c+'" style="background:'+c+'" class="'+(c===cur.color?'on':'')+'"></button>'; }).join('') + '<input type="color" id="cc" value="'+cur.color+'" style="width:28px;height:24px;border:0;padding:0;background:none">';
+ig.onclick = function(e){ var b=e.target.closest('button'); if(!b) return; cur.icon=b.getAttribute('data-i'); ig.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x===b); }); };
+cg.onclick = function(e){ var b=e.target.closest('button'); if(!b) return; cur.color=b.getAttribute('data-c'); cg.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x===b); }); };
+document.getElementById('cc').oninput = function(e){ cur.color = e.target.value; };
+document.getElementById('palBtn').onclick = function(){ document.getElementById('pal').classList.toggle('open'); };
+
+/* ---------- settings ---------- */
+document.getElementById('cCluster').onchange = function(e){
+  if(e.target.checked){ map.removeLayer(plain); plain.clearLayers(); pts.forEach(function(p){ cluster.addLayer(p.m); }); cluster.addTo(map); }
+  else { map.removeLayer(cluster); pts.forEach(function(p){ plain.addLayer(p.m); }); plain.addTo(map); }
+};
+document.getElementById('cNotes').onchange = function(e){
+  pts.forEach(function(p){ p.m.unbindTooltip(); p.m.bindTooltip(p.g.count===1 ? p.g.items[0].note : 'مواقع متعددة ('+p.g.count+')', { permanent:e.target.checked, direction:'top', offset:[0,-34] }); });
+};
+document.getElementById('cZones').onchange = function(e){
+  if(!shapeLayer) return;
+  if(e.target.checked) shapeLayer.addTo(map); else { map.removeLayer(shapeLayer); map.removeLayer(zoneLabels); }
+  if(e.target.checked && document.getElementById('cZN').checked) zoneLabels.addTo(map);
+};
+document.getElementById('cZN').onchange = function(e){
+  if(e.target.checked && map.hasLayer(shapeLayer||{})) zoneLabels.addTo(map); else map.removeLayer(zoneLabels);
+};
+document.getElementById('projectFilter').onchange = function(){ location.href = '/?shape_proj='+encodeURIComponent(this.value); };
+
+/* tabs, panel, upload */
+document.querySelectorAll('.tab').forEach(function(t){ t.onclick = function(){
+  document.querySelectorAll('.tab').forEach(function(x){ x.classList.toggle('on', x===t); });
+  document.querySelectorAll('.pane').forEach(function(p){ p.classList.toggle('on', p.id===t.getAttribute('data-t')); });
+}; });
+document.getElementById('hidePanel').onclick = function(){ document.getElementById('panel').classList.add('hide'); document.getElementById('tog').style.display='block'; };
+document.getElementById('tog').onclick = function(){ document.getElementById('panel').classList.remove('hide'); this.style.display='none'; };
+var drop = document.getElementById('drop'), fin = document.getElementById('fileIn');
+function showName(){ if(fin.files.length) document.getElementById('fname').textContent = fin.files[0].name; }
+drop.onclick = function(){ fin.click(); }; fin.onchange = showName;
+['dragenter','dragover'].forEach(function(n){ drop.addEventListener(n, function(e){ e.preventDefault(); drop.classList.add('over'); }); });
+['dragleave','drop'].forEach(function(n){ drop.addEventListener(n, function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
+drop.addEventListener('drop', function(e){ fin.files = e.dataTransfer.files; showName(); });
+var toast = document.getElementById('toast'); if(toast) setTimeout(function(){ toast.style.display='none'; }, 5000);
+
+/* ---------- PDF report (with distance from previous point) ---------- */
+document.getElementById('pdfBtn').onclick = function(){
+  var btn = this; btn.textContent = 'جاري التجهيز...';
+  html2canvas(document.getElementById('map'), { useCORS:true, allowTaint:true, scale:1.5, ignoreElements:function(el){ return el.classList && (el.classList.contains('leaflet-control-container')); } }).then(function(cv){
+    var title = document.getElementById('repTitle').value.trim() || 'تقرير الخريطة';
+    var rows = '', prev = null, n = 1;
+    pts.forEach(function(p){
+      var d = prev ? fmt(map.distance(prev, [p.g.lat, p.g.lon])) : '-';
+      p.g.items.forEach(function(it){
+        rows += '<tr><td>'+(n++)+'</td><td>'+esc(p.g.project)+'</td><td>'+esc(it.note)+'</td><td>'+p.g.lat.toFixed(5)+'</td><td>'+p.g.lon.toFixed(5)+'</td><td>'+esc(it.round_id||'-')+'</td><td>'+d+'</td></tr>';
+      });
+      prev = [p.g.lat, p.g.lon];
+    });
+    var el = document.createElement('div');
+    el.innerHTML = '<div dir="rtl" style="font-family:Cairo,Tahoma,sans-serif;padding:8px"><h2 style="text-align:center;font-size:16px;margin:0 0 6px">'+esc(title)+'</h2>'+
+      '<div style="text-align:center;font-size:10px;color:#6b7c88;margin-bottom:8px;direction:ltr">'+new Date().toLocaleString('en-GB')+'</div>'+
+      '<img src="'+cv.toDataURL('image/png')+'" style="width:100%;max-height:320px;object-fit:contain;border:1px solid #ccc;border-radius:6px">'+
+      '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:9px"><thead><tr style="background:#14212b;color:#fff"><th>م</th><th>المشروع</th><th>ملاحظة</th><th>Lat</th><th>Lon</th><th>منطقة الإشراف</th><th>المسافة من السابقة</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    el.querySelectorAll('td,th').forEach(function(c){ c.style.border='1px solid #ddd'; c.style.padding='4px 6px'; c.style.textAlign='right'; });
+    html2pdf().from(el).set({ margin:5, filename:title+'.pdf', image:{ type:'jpeg', quality:.9 }, html2canvas:{ scale:2 }, jsPDF:{ unit:'mm', format:'a4', orientation:'landscape' } }).save().then(function(){ btn.textContent='تحميل التقرير PDF'; });
+  }).catch(function(){ alert('تعذر أخذ لقطة للخريطة.'); btn.textContent='تحميل التقرير PDF'; });
+};
+
+/* ---------- initial view ---------- */
+if(ST){
+  map.setView([ST.lat, ST.lon], 17);
+  L.marker([ST.lat, ST.lon], { icon:pin('📍', '#d64545', true, 1) }).addTo(map).bindPopup(esc(ST.note)).openPopup();
+} else if(shapeLayer){ try{ map.fitBounds(shapeLayer.getBounds()); }catch(e){} }
+else if(bounds.length){ map.fitBounds(bounds, { paddingTopLeft:[20,20], paddingBottomRight:[400,20] }); }
+</script>
 </body>
 </html>
