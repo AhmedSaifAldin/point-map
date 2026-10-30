@@ -594,7 +594,7 @@ drop.onclick = function(){ fin.click(); }; fin.onchange = showName;
 drop.addEventListener('drop', function(e){ fin.files = e.dataTransfer.files; showName(); });
 var toast = document.getElementById('toast'); if(toast) setTimeout(function(){ toast.style.display='none'; }, 5000);
 
-/* ---------- PDF report (with distance from previous point) ---------- */
+/* ---------- PDF report (map page + paginated data tables) ---------- */
 function natCmp(a, b){ return String(a).localeCompare(String(b), undefined, { numeric:true, sensitivity:'base' }); }
 function nearestChain(list, from){
   var rest = list.slice(), out = [], c = from || null;
@@ -627,7 +627,9 @@ function captureMapClear(cb){
     map.setView(c0, z0, { animate:false });
   }
   map.invalidateSize();
-  if(bounds.length){ try{ map.fitBounds(bounds, { padding:[70, 70], maxZoom:17, animate:false }); }catch(e){} }
+  var fitPts = bounds.slice();
+  anno.forEach(function(a){ if(a.t !== 'line' && a.lat != null) fitPts.push([a.lat, a.lon]); });
+  if(fitPts.length){ try{ map.fitBounds(fitPts, { padding:[70, 70], maxZoom:17, animate:false }); }catch(e){} }
   whenTilesReady(function(){
     html2canvas(document.getElementById('map'), { useCORS:true, scale:Math.max(2, window.devicePixelRatio || 1), logging:false,
       ignoreElements:function(el){ return el.classList && el.classList.contains('leaflet-top'); } })
@@ -635,39 +637,79 @@ function captureMapClear(cb){
       .catch(function(err){ restore(); cb(err); });
   });
 }
+var ROWS_PER_PAGE = 22;
+function pageEl(inner){
+  var d = document.createElement('div');
+  d.setAttribute('dir', 'rtl');
+  d.style.cssText = 'width:1040px;padding:8px;background:#fff;font-family:Cairo,Tahoma,sans-serif;color:#14212b';
+  d.innerHTML = inner;
+  d.querySelectorAll('td,th').forEach(function(c){ c.style.border = '1px solid #ddd'; c.style.padding = '5px 7px'; c.style.textAlign = 'right'; });
+  return d;
+}
 function makePdf(){
   var btn = document.getElementById('pdfBtn'); btn.textContent = 'جاري التجهيز...';
   function finish(){ btn.textContent = 'تحميل التقرير PDF'; }
   captureMapClear(function(err, cv){
     if(err){ alert('تعذر أخذ لقطة للخريطة.'); finish(); return; }
-    var title = document.getElementById('repTitle').value.trim() || 'تقرير الخريطة';
-    var NOZ = 'بدون منطقة', groups = {}, total = 0;
-    pts.forEach(function(p){
-      p.g.items.forEach(function(it){
-        var z = (it.round_id && it.round_id !== '-') ? it.round_id : NOZ;
-        (groups[z] = groups[z] || []).push({ lat:p.g.lat, lon:p.g.lon, project:p.g.project, note:it.note });
-        total++;
+    try{
+      var title = document.getElementById('repTitle').value.trim() || 'تقرير الخريطة';
+      var NOZ = 'بدون منطقة', groups = {}, total = 0;
+      pts.forEach(function(p){
+        p.g.items.forEach(function(it){
+          var z = (it.round_id && it.round_id !== '-') ? it.round_id : NOZ;
+          (groups[z] = groups[z] || []).push({ lat:p.g.lat, lon:p.g.lon, project:p.g.project, note:it.note });
+          total++;
+        });
       });
-    });
-    var zones = Object.keys(groups).sort(function(a, b){ if(a === NOZ) return 1; if(b === NOZ) return -1; return natCmp(a, b); });
-    var rows = '', n = 1, prev = null;
-    zones.forEach(function(z){
-      nearestChain(groups[z], prev).forEach(function(r){
-        var d = prev ? fmt(map.distance(prev, [r.lat, r.lon])) : '-';
-        rows += '<tr><td>'+(n++)+'</td><td>'+esc(r.project)+'</td><td>'+esc(r.note)+'</td><td>'+r.lat.toFixed(5)+'</td><td>'+r.lon.toFixed(5)+'</td><td>'+esc(z)+'</td><td>'+d+'</td></tr>';
-        prev = [r.lat, r.lon];
+      /* points the user placed by hand on the map are included too */
+      anno.forEach(function(a){
+        if(a.t === 'marker' && a.lat != null){
+          (groups[NOZ] = groups[NOZ] || []).push({ lat:a.lat, lon:a.lon, project:'رسوماتي', note:a.text || 'نقطة' });
+          total++;
+        }
       });
-    });
-    var el = document.createElement('div');
-    el.innerHTML = '<div dir="rtl" style="font-family:Cairo,Tahoma,sans-serif;padding:8px">'+
-      '<div><h2 style="text-align:center;font-size:16px;margin:0 0 4px">'+esc(title)+'</h2>'+
-      '<div style="text-align:center;font-size:10px;color:#6b7c88;margin-bottom:8px"><span style="direction:ltr;display:inline-block">'+new Date().toLocaleString('en-GB')+'</span> — عدد البلاغات: '+total+' — عدد مناطق الإشراف: '+zones.length+'</div>'+
-      '<img src="'+cv.toDataURL('image/jpeg', 0.95)+'" style="width:100%;max-height:640px;object-fit:contain;display:block;border:1px solid #ccc;border-radius:6px"></div>'+
-      '<div style="page-break-before:always"><table style="width:100%;border-collapse:collapse;font-size:9px"><thead><tr style="background:#14212b;color:#fff"><th>م</th><th>المشروع</th><th>ملاحظة</th><th>Lat</th><th>Lon</th><th>منطقة الإشراف</th><th>المسافة من السابقة</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
-    el.querySelectorAll('td,th').forEach(function(c){ c.style.border = '1px solid #ddd'; c.style.padding = '4px 6px'; c.style.textAlign = 'right'; });
-    el.querySelectorAll('tr').forEach(function(r){ r.style.pageBreakInside = 'avoid'; });
-    html2pdf().from(el).set({ margin:5, filename:title+'.pdf', image:{ type:'jpeg', quality:.95 }, html2canvas:{ scale:2, useCORS:true },
-      pagebreak:{ mode:['css', 'legacy'], avoid:'tr' }, jsPDF:{ unit:'mm', format:'a4', orientation:'landscape' } }).save().then(finish).catch(finish);
+      var zones = Object.keys(groups).sort(function(a, b){ if(a === NOZ) return 1; if(b === NOZ) return -1; return natCmp(a, b); });
+      var rows = [], n = 1, prev = null;
+      zones.forEach(function(z){
+        nearestChain(groups[z], prev).forEach(function(r){
+          var d = prev ? fmt(map.distance(prev, [r.lat, r.lon])) : '-';
+          rows.push('<tr><td>'+(n++)+'</td><td>'+esc(r.project)+'</td><td>'+esc(r.note)+'</td><td>'+r.lat.toFixed(5)+'</td><td>'+r.lon.toFixed(5)+'</td><td>'+esc(z)+'</td><td>'+d+'</td></tr>');
+          prev = [r.lat, r.lon];
+        });
+      });
+
+      var pages = [];
+      pages.push(pageEl(
+        '<h2 style="text-align:center;font-size:18px;margin:0 0 4px">'+esc(title)+'</h2>'+
+        '<div style="text-align:center;font-size:11px;color:#6b7c88;margin-bottom:8px"><span style="direction:ltr;display:inline-block">'+new Date().toLocaleString('en-GB')+'</span> — عدد البلاغات: '+total+' — عدد مناطق الإشراف: '+zones.filter(function(z){ return z !== NOZ; }).length+'</div>'+
+        '<img src="'+cv.toDataURL('image/jpeg', 0.92)+'" style="width:100%;max-height:610px;object-fit:contain;display:block;border:1px solid #ccc;border-radius:6px">'
+      ));
+
+      var head = '<thead><tr style="background:#14212b;color:#fff"><th>م</th><th>المشروع</th><th>ملاحظة</th><th>Lat</th><th>Lon</th><th>منطقة الإشراف</th><th>المسافة من السابقة</th></tr></thead>';
+      if(!rows.length){
+        pages.push(pageEl('<div style="text-align:center;padding:60px 0;font-size:16px;color:#6b7c88">لا توجد نقاط محفوظة لعرضها في الجدول. احفظ النقاط أولاً ثم أعد التقرير.</div>'));
+      } else {
+        var totalPages = Math.ceil(rows.length / ROWS_PER_PAGE);
+        for(var i = 0; i < rows.length; i += ROWS_PER_PAGE){
+          pages.push(pageEl(
+            '<div style="font-size:12px;font-weight:700;margin-bottom:6px">جدول البيانات ('+(i/ROWS_PER_PAGE+1)+' / '+totalPages+')</div>'+
+            '<table style="width:100%;border-collapse:collapse;font-size:12px">'+head+'<tbody>'+rows.slice(i, i + ROWS_PER_PAGE).join('')+'</tbody></table>'
+          ));
+        }
+      }
+
+      var opt = { margin:5, filename:title+'.pdf', image:{ type:'jpeg', quality:.95 }, html2canvas:{ scale:1.6, useCORS:true },
+        jsPDF:{ unit:'mm', format:'a4', orientation:'landscape' } };
+      var w = html2pdf().set(opt);
+      pages.forEach(function(pg, i){
+        w = w.from(pg).toContainer().toCanvas().toPdf().get('pdf').then(function(pdf){
+          if(i < pages.length - 1) pdf.addPage();
+        });
+      });
+      w.save().then(finish).catch(function(e){ console.error(e); alert('تعذر إنشاء ملف PDF.'); finish(); });
+    } catch(e){
+      console.error(e); alert('تعذر إنشاء ملف PDF.'); finish();
+    }
   });
 }
 document.getElementById('pdfBtn').onclick = makePdf;

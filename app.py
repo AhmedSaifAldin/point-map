@@ -4,8 +4,11 @@ import os
 import re
 import tempfile
 import uuid
+from urllib.parse import unquote
+
 from flask import (
     Flask,
+    jsonify,
     redirect,
     render_template,
     render_template_string,
@@ -27,40 +30,54 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 USERNAME = 'admin'
 PASSWORD = '123'
 
+COORD_PATTERNS = [
+    r'@(-?\d+\.\d+),(-?\d+\.\d+)',
+    r'[?&](?:q|ll|query|destination|center)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)',
+    r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)',
+]
+
+
+def _find_coords(text):
+  if not text:
+    return None
+  text = unquote(text)
+  for pattern in COORD_PATTERNS:
+    m = re.search(pattern, text)
+    if m:
+      return float(m.group(1)), float(m.group(2))
+  return None
+
 
 def get_real_coordinates_from_url(short_url):
   if not short_url or 'http' not in short_url:
     return None, None
 
-  match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', short_url)
-  if match:
-    return float(match.group(1)), float(match.group(2))
-
-  match_q = re.search(r'q=(-?\d+\.\d+),(-?\d+\.\d+)', short_url)
-  if match_q:
-    return float(match_q.group(1)), float(match_q.group(2))
+  found = _find_coords(short_url)
+  if found:
+    return found
 
   headers = {
       'User-Agent': (
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
           'AppleWebKit/537.36 (KHTML, like Gecko) '
           'Chrome/120.0.0.0 Safari/537.36'
-      )
+      ),
+      'Accept-Language': 'en-US,en;q=0.9',
   }
   try:
     response = requests.get(
-        short_url, headers=headers, allow_redirects=True, timeout=3
+        short_url, headers=headers, allow_redirects=True, timeout=8
     )
-    final_url = response.url
-
-    match_final = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
-    if match_final:
-      return float(match_final.group(1)), float(match_final.group(2))
-
-    match_q_final = re.search(r'q=(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
-    if match_q_final:
-      return float(match_q_final.group(1)), float(match_q_final.group(2))
-
+    found = _find_coords(response.url)
+    if found:
+      return found
+    for r in response.history:
+      found = _find_coords(r.headers.get('Location', ''))
+      if found:
+        return found
+    found = _find_coords(response.text[:300000])
+    if found:
+      return found
   except Exception:
     pass
 
@@ -541,6 +558,45 @@ def clear_data():
         pass
 
   return redirect(url_for('index'))
+
+
+@app.route('/resolve', methods=['POST'])
+def resolve():
+  """Resolves a (short) Google Maps link to coordinates."""
+  if not session.get('logged_in'):
+    return jsonify({'error': 'auth'}), 401
+  url = (request.get_json(silent=True) or {}).get('url', '')
+  lat, lon = get_real_coordinates_from_url(str(url).strip())
+  if lat is None or lon is None:
+    return jsonify({'lat': None, 'lon': None, 'debug': 'تعذر استخراج الإحداثيات'})
+  return jsonify({'lat': lat, 'lon': lon})
+
+
+@app.route('/save_links', methods=['POST'])
+def save_links():
+  """Saves points previewed from links so they appear in the list and PDF."""
+  if not session.get('logged_in'):
+    return jsonify({'error': 'auth'}), 401
+  data = request.get_json(silent=True) or {}
+  project = (data.get('project') or '').strip() or ' '
+  note = (data.get('note') or '').strip() or 'موقع من رابط خرائط'
+  new_points = []
+  for p in data.get('points', []):
+    try:
+      new_points.append({
+          'lat': float(p['lat']),
+          'lon': float(p['lon']),
+          'note': note,
+          'url': p.get('url') or '#',
+          'project': project,
+          'neighborhood': '-',
+          'extra_details': {},
+      })
+    except Exception:
+      continue
+  if new_points:
+    save_custom_points_bulk(new_points)
+  return jsonify({'saved': len(new_points)})
 
 
 @app.route('/', methods=['GET', 'POST'])
