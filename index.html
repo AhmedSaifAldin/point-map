@@ -608,12 +608,13 @@ function drawnZoneOf(lat, lon){
 }
 /* every point on the map: saved ones, drawn markers, and links pasted but not saved yet */
 function allPoints(){
-  var out = [];
-  pts.forEach(function(p){ p.g.items.forEach(function(it){ out.push({ lat:p.g.lat, lon:p.g.lon, project:(p.g.project || '').trim(), note:it.note, src:'محفوظة' }); }); });
-  anno.forEach(function(a){ if(a.t === 'marker' && a.lat != null) out.push({ lat:a.lat, lon:a.lon, project:'رسوماتي', note:a.text || 'نقطة', src:'رسوماتي' }); });
+  var out = [], ns = 0, na = 0;
+  /* num = the point's own number: saved = order in the saved list, drawn = order drawn, link = number shown on its map pin */
+  pts.forEach(function(p){ p.g.items.forEach(function(it){ out.push({ lat:p.g.lat, lon:p.g.lon, project:(p.g.project || '').trim(), note:it.note, src:'محفوظة', rank:0, num:++ns }); }); });
+  anno.forEach(function(a){ if(a.t === 'marker' && a.lat != null) out.push({ lat:a.lat, lon:a.lon, project:'رسوماتي', note:a.text || 'نقطة', src:'رسوماتي', rank:1, num:++na }); });
   if(lkText) lkUrls().forEach(function(u, i){
     var r = lkRes[u]; if(!r || r.s !== 'ok') return;
-    out.push({ lat:r.lat, lon:r.lon, project:document.getElementById('lkProject').value.trim(), note:lkNoteFor(i) || 'موقع من رابط خرائط', src:'رابط غير محفوظ' });
+    out.push({ lat:r.lat, lon:r.lon, project:document.getElementById('lkProject').value.trim(), note:lkNoteFor(i) || 'موقع من رابط خرائط', src:'رابط غير محفوظ', rank:2, num:i + 1 });
   });
   return out;
 }
@@ -678,13 +679,13 @@ async function exportZonesXlsx(){
   await waitLinks();
   var OUT = 'خارج النطاقات', P = allPoints();
   P.forEach(function(p){ var z = drawnZoneOf(p.lat, p.lon); p.zone = z ? z.name : OUT; p.zi = z ? zones.indexOf(z) : zones.length; p.url = goUrl(p.lat, p.lon); });
-  P.sort(function(a, b){ return a.zi - b.zi || natCmp(a.note, b.note); });
+  P.sort(function(a, b){ return a.zi - b.zi || a.rank - b.rank || a.num - b.num; });
 
-  var s1 = [['م', 'النطاق', 'المشروع', 'الملاحظة', 'Lat', 'Lon', 'رابط الموقع', 'المصدر']];
-  P.forEach(function(p, i){ s1.push([i + 1, p.zone, p.project || '-', p.note, +p.lat.toFixed(6), +p.lon.toFixed(6), p.url, p.src]); });
+  var s1 = [['رقم النقطة', 'النطاق', 'المشروع', 'الملاحظة', 'Lat', 'Lon', 'رابط الموقع', 'المصدر']];
+  P.forEach(function(p, i){ s1.push([p.num, p.zone, p.project || '-', p.note, +p.lat.toFixed(6), +p.lon.toFixed(6), p.url, p.src]); });
   var ws1 = XLSX.utils.aoa_to_sheet(s1);
   P.forEach(function(p, i){ var c = ws1[XLSX.utils.encode_cell({ r:i + 1, c:6 })]; if(c) c.l = { Target:p.url, Tooltip:'فتح في خرائط جوجل' }; });
-  ws1['!cols'] = [{ wch:6 }, { wch:22 }, { wch:22 }, { wch:36 }, { wch:12 }, { wch:12 }, { wch:44 }, { wch:16 }];
+  ws1['!cols'] = [{ wch:12 }, { wch:22 }, { wch:22 }, { wch:36 }, { wch:12 }, { wch:12 }, { wch:44 }, { wch:16 }];
 
   var s2 = [['النطاق', 'رقم الرأس', 'Lat', 'Lon']];
   zones.forEach(function(z){ z.ring.forEach(function(p, k){ s2.push([z.name, k + 1, +p[0].toFixed(6), +p[1].toFixed(6)]); }); });
