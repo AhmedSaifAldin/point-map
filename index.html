@@ -12,7 +12,8 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 :root{--ink:#14212b;--mut:#6b7c88;--line:#e3e9ec;--bg:#f6f8f7;--acc:#0f8b8d;--acc2:#0b6e70;--amb:#f2a541;--red:#d64545}
 *{box-sizing:border-box}
@@ -77,7 +78,22 @@ h4{margin:14px 0 8px;font-size:13px}
 .pop button{border:0;border-radius:7px;padding:4px 9px;margin:3px 3px 0 0;cursor:pointer;background:var(--acc);color:#fff;font-size:11px}
 .pop button.d{background:var(--red)}
 .leaflet-container{font-family:'Cairo',sans-serif}
-@media(max-width:700px){.panel{width:auto;left:8px;right:8px;top:auto;height:55vh}#tools{left:50%;bottom:calc(55vh + 20px)}#pal{left:50%;bottom:calc(55vh + 92px)}}
+#credit{position:absolute;left:12px;bottom:12px;z-index:900;background:rgba(255,255,255,.9);color:var(--ink);font-size:12px;font-weight:600;padding:4px 12px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.2);pointer-events:none;direction:ltr}
+textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-family:inherit;font-size:12px;direction:ltr;resize:vertical;background:#fff}
+.lk{display:flex;align-items:center;gap:6px;padding:4px 2px;font-size:12px;border-bottom:1px solid var(--line)}
+.lk b{min-width:22px}.lk span.u{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;color:var(--mut)}
+.dbg{font-size:10px;color:var(--mut);direction:ltr;word-break:break-all;padding:0 6px 6px;border-bottom:1px solid var(--line)}
+.lk button{border:0;background:none;color:var(--red);cursor:pointer;font-size:14px}
+.lkn{font-size:11px;color:var(--acc2);padding:2px 30px 4px 2px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#lkList{max-height:180px;overflow-y:auto;margin-bottom:10px}
+#sideTools{position:absolute;left:12px;top:50%;transform:translateY(-50%);z-index:900;display:flex;flex-direction:column;gap:8px}
+.fab{width:54px;border:0;border-radius:14px;background:#fff;box-shadow:0 4px 14px rgba(0,0,0,.25);padding:7px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;font-weight:600;color:var(--ink)}
+.fab:hover{background:#eef3f4}.fab:disabled{opacity:.6;cursor:wait}.fab span{font-size:20px;line-height:1.2}.fab small{font-size:11px}
+.seg{display:flex;gap:4px;margin-bottom:8px}
+.seg button{flex:1;border:0;border-radius:8px;padding:6px 4px;background:#eef3f4;cursor:pointer;font-size:12px;font-weight:600;color:var(--ink)}
+.seg button.on{background:var(--ink);color:#fff}
+#selInfo{display:none;font-size:11px;color:var(--acc2);font-weight:600;margin-bottom:8px}
+@media(max-width:700px){.panel{width:auto;left:8px;right:8px;top:auto;height:55vh}#credit{bottom:calc(55vh + 20px)}#tools{left:50%;bottom:calc(55vh + 20px)}#pal{left:50%;bottom:calc(55vh + 92px)}}
 </style>
 </head>
 <body>
@@ -106,13 +122,17 @@ h4{margin:14px 0 8px;font-size:13px}
  </div>
 
  <div class="pane" id="p2">
-  <h4 style="margin-top:0">من رابط خرائط</h4>
-  <form method="POST">
-   <label>اسم المشروع</label><input type="text" name="project_name" placeholder="اسم المشروع">
-   <label>رابط الموقع</label><input type="text" name="maps_url" placeholder="https://maps.app.goo.gl/..." required>
-   <label>ملاحظة</label><input type="text" name="maps_note" placeholder="تفاصيل الموقع">
-   <div class="row"><button class="btn" name="action" value="search_map_url">حفظ</button><button class="btn s" name="action" value="preview_map_url">استعراض</button></div>
-  </form>
+  <h4 style="margin-top:0">إضافة من روابط خرائط</h4>
+  <label>اسم المشروع</label><input type="text" id="lkProject" placeholder="اسم المشروع">
+  <label>الصق الروابط (رابط في كل سطر، بدون حد للعدد)</label>
+  <textarea id="lkText" rows="5" placeholder="https://maps.app.goo.gl/..."></textarea>
+  <div id="lkInfo" style="font-size:12px;color:var(--mut);margin-bottom:6px">الصق رابطاً وستظهر النقطة فوراً على الخريطة.</div>
+  <div id="lkList"></div>
+  <button type="button" class="btn s" id="lkRetry" style="display:none;margin-bottom:10px">إعادة محاولة الروابط الفاشلة</button>
+  <label>الملاحظات (اختياري): ملاحظة في كل سطر بنفس ترتيب الروابط</label>
+  <textarea id="lkNote" rows="5" style="direction:rtl" placeholder="السطر 1 = ملاحظة الرابط 1&#10;السطر 2 = ملاحظة الرابط 2&#10;(ملاحظة واحدة فقط = تنطبق على الكل)"></textarea>
+  <div class="row"><button type="button" class="btn" id="lkSave">حفظ</button><button type="button" class="btn s" id="lkSavePdf">حفظ + تقرير PDF</button></div>
+  <button type="button" class="btn s" id="lkClear" style="margin-top:8px">مسح الروابط</button>
   <div class="sep"></div>
   <h4 style="margin-top:0">من إحداثيات</h4>
   <form method="POST">
@@ -154,16 +174,32 @@ h4{margin:14px 0 8px;font-size:13px}
   <h4>ألوان الطبقات</h4><div id="colors"></div>
   <div class="sep"></div>
   <label>اسم التقرير</label><input type="text" id="repTitle" value="تقرير الخريطة والبيانات">
-  <button class="btn" id="pdfBtn">تحميل التقرير PDF</button>
+  <label>نطاق الخريطة في التقرير</label>
+  <select id="repExtent"><option value="all">كل النقاط</option><option value="view">العرض الحالي على الشاشة</option></select>
+  <label class="toggle"><input type="checkbox" id="repQR" checked> إضافة أكواد QR وأزرار «اذهب للموقع»</label>
+  <button class="btn" id="pdfBtn">تحميل التقرير PDF (تفاعلي)</button>
+  <div style="font-size:11px;color:var(--mut);margin-top:6px">تُطبع الخريطة بنفس النوع المختار حالياً (شوارع / قمر صناعي)، والروابط وأكواد QR تعمل داخل الملف.</div>
   <div class="row" style="margin-top:8px"><a class="btn s" style="text-align:center;text-decoration:none" href="/clear" onclick="return confirm('مسح كل النقاط؟')">مسح الخريطة</a><a class="btn s" style="text-align:center;text-decoration:none" href="/logout">خروج</a></div>
   <button class="btn d" id="clearAnno" style="margin-top:8px">مسح رسوماتي (نصوص وخطوط)</button>
-  <p style="text-align:center;font-size:11px;color:var(--mut)">Designed By Ahmed Saif Alashry</p>
  </div>
 </aside>
 
+<div id="credit">Designed By Ahmed Saif Alashry</div>
+<div id="sideTools">
+ <button class="fab" id="shot" title="لقطة شاشة للخريطة"><span>📷</span><small>صورة</small></button>
+ <button class="fab" id="pdfFab" title="طباعة الخريطة PDF تفاعلي (QR وأزرار الذهاب للموقع)"><span>📄</span><small>PDF</small></button>
+</div>
 <div id="pal">
+ <label>تطبيق الأيقونة على</label>
+ <div class="seg" id="scope"><button type="button" data-s="new" class="on">نقطة جديدة</button><button type="button" data-s="one">هذه النقطة فقط</button><button type="button" data-s="all">كل النقاط</button></div>
+ <div id="selInfo"></div>
  <label>الأيقونة</label><div class="ig" id="ig"></div>
  <label>اللون</label><div class="cg" id="cg"></div>
+ <div id="newOpts">
+  <label style="margin-top:8px">اسم النقطة (اختياري)</label><input type="text" id="pname" placeholder="مثال: موقع 1">
+  <button type="button" class="btn" id="addIcon">＋ إضافة في وسط الخريطة</button>
+  <div style="font-size:11px;color:var(--mut);margin-top:6px;text-align:center">أو اضغط على أي مكان في الخريطة لوضعها</div>
+ </div>
 </div>
 <div id="tools">
  <button class="tl on" data-m="none"><span>🖐</span><small>تنقل</small></button>
@@ -185,6 +221,12 @@ var ST = JSON.parse(SRV.st);
 
 function store(k, v){ try{ if(v===undefined) return JSON.parse(localStorage.getItem(k)||'null'); localStorage.setItem(k, JSON.stringify(v)); }catch(e){ return null; } }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function showToast(msg){
+  var t = document.getElementById('toast');
+  if(!t){ t = document.createElement('div'); t.id = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(function(){ t.style.display = 'none'; }, 4500);
+}
 function fmt(m){ return m < 1000 ? Math.round(m)+' م' : (m/1000).toFixed(2)+' كم'; }
 
 var ICONS = ['📍','🏠','🏢','🏗️','⚠️','🚧','⛽','🅿️','🏥','🕌','🏫','🛒','🚗','⭐','🔧','📷','🚩','💧','⚡','🌳'];
@@ -194,18 +236,23 @@ var cur = { icon:'📍', color:'#0f8b8d' };
 /* ---------- map ---------- */
 var map = L.map('map', { zoomControl:false }).setView([24.7136, 46.6753], 12);
 L.control.zoom({ position:'topleft' }).addTo(map);
-var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap', maxZoom:19, crossOrigin:true }).addTo(map);
-var sat = L.layerGroup([
+function mkStreet(attr){ return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:attr ? '© OpenStreetMap' : '', maxZoom:19, crossOrigin:true }); }
+function mkSat(){ return [
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, crossOrigin:true }),
   L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom:19, crossOrigin:true })
-]);
+]; }
+var street = mkStreet(true).addTo(map);
+var sat = L.layerGroup(mkSat());
 L.control.layers({ 'خريطة الشوارع': street, 'قمر صناعي': sat }, null, { position:'topleft' }).addTo(map);
+var activeBase = 'street';
+if(store('base') === 'sat'){ map.removeLayer(street); sat.addTo(map); activeBase = 'sat'; }
+map.on('baselayerchange', function(e){ activeBase = (e.layer === sat) ? 'sat' : 'street'; store('base', activeBase); });
 setTimeout(function(){ map.invalidateSize(); }, 400);
 
 function pin(icon, color, hl, count){
   var b = count > 1 ? '<div class="bd">'+count+'</div>' : '';
   return L.divIcon({ className:'', iconSize:[34,40], iconAnchor:[17,38], popupAnchor:[0,-36],
-    html:'<div class="pin'+(hl?' hl':'')+'" style="--c:'+color+'"><span>'+icon+'</span></div>'+b });
+    html:'<div class="pin'+(hl?' hl':'')+'" style="background:'+color+'"><span>'+icon+'</span></div>'+b });
 }
 function label(cls, html, pos){ return L.marker(pos, { interactive:false, icon:L.divIcon({ className:'', html:'<div class="'+cls+'">'+html+'</div>', iconSize:[0,0] }) }); }
 
@@ -253,24 +300,62 @@ function pointPopup(g, i){
   g.items.forEach(function(it, n){
     h += '<div class="it"><b>'+esc(it.note)+'</b><i>منطقة الإشراف: '+esc(it.round_id||'-')+'</i>';
     for(var k in (it.extra_details||{})) h += '<i>'+esc(k)+': '+esc(it.extra_details[k])+'</i>';
-    if(it.url && it.url!=='#') h += '<a href="'+esc(it.url)+'" target="_blank">فتح في جوجل</a>';
+    h += '<a href="'+esc(it.url && it.url!=='#' ? it.url : goUrl(g.lat, g.lon))+'" target="_blank">فتح في جوجل</a>';
     h += '</div>';
   });
-  return h + '<i style="font-size:11px;color:#6b7c88">'+g.lat.toFixed(5)+', '+g.lon.toFixed(5)+'</i><br><button onclick="styleServerPt('+i+')">استخدم الأيقونة المختارة</button></div>';
+  return h + '<i style="font-size:11px;color:#6b7c88">'+g.lat.toFixed(5)+', '+g.lon.toFixed(5)+'</i><br><button onclick="styleServerPt('+i+',false)">الأيقونة المختارة: هذه النقطة فقط</button><button onclick="styleServerPt('+i+',true)">على كل النقاط</button></div>';
 }
 G.forEach(function(g, i){
   var s = pstyle[key(g)] || { icon:'📍', color:'#8e44ad' };
   var m = L.marker([g.lat, g.lon], { icon:pin(s.icon, s.color, false, g.count) });
   m.bindPopup(function(){ return pointPopup(g, i); });
+  m.on('popupopen', function(){ sel = { k:'pt', i:i }; updateSel(); });
   m.bindTooltip(g.count===1 ? g.items[0].note : 'مواقع متعددة ('+g.count+')', { direction:'top', offset:[0,-34] });
   cluster.addLayer(m);
   pts.push({ m:m, g:g, s:s });
   bounds.push([g.lat, g.lon]);
 });
-function styleServerPt(i){
-  var p = pts[i]; p.s = { icon:cur.icon, color:cur.color };
-  pstyle[key(p.g)] = p.s; store('pstyle', pstyle);
-  p.m.setIcon(pin(p.s.icon, p.s.color, false, p.g.count)); renderList();
+var sel = null, scope = 'new';
+function setPtStyle(i, patch){
+  var p = pts[i]; if(!p) return;
+  p.s = { icon:patch.icon || p.s.icon, color:patch.color || p.s.color };
+  pstyle[key(p.g)] = p.s;
+  p.m.setIcon(pin(p.s.icon, p.s.color, false, p.g.count));
+}
+function updateSel(){
+  var el = document.getElementById('selInfo'); if(!el) return;
+  var name = '';
+  if(sel && sel.k === 'pt' && pts[sel.i]) name = pts[sel.i].g.items[0].note;
+  else if(sel && sel.k === 'anno' && anno[sel.i]) name = anno[sel.i].text || 'نقطة';
+  el.textContent = name ? 'النقطة المحددة: '+name : 'اضغط على نقطة في الخريطة لتحديدها';
+}
+function setScope(s){
+  scope = s;
+  document.querySelectorAll('#scope button').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-s') === s); });
+  document.getElementById('newOpts').style.display = s === 'new' ? 'block' : 'none';
+  document.getElementById('selInfo').style.display = s === 'one' ? 'block' : 'none';
+  if(s === 'one') updateSel();
+}
+function applyScope(patch){
+  if(scope === 'all'){
+    pts.forEach(function(p, i){ setPtStyle(i, patch); });
+    store('pstyle', pstyle); renderList(); showToast('تم التطبيق على كل النقاط ('+pts.length+')'); return;
+  }
+  if(!sel){ showToast('اضغط على نقطة في الخريطة لتحديدها أولاً'); return; }
+  if(sel.k === 'pt'){ setPtStyle(sel.i, patch); store('pstyle', pstyle); renderList(); }
+  else if(sel.k === 'anno' && anno[sel.i]){
+    var a = anno[sel.i];
+    if(patch.icon && a.t === 'marker') a.icon = patch.icon;
+    if(patch.color) a.color = patch.color;
+    saveAnno(); drawAnno();
+  }
+  showToast('تم التطبيق على هذه النقطة فقط');
+}
+function styleServerPt(i, all){
+  var patch = { icon:cur.icon, color:cur.color };
+  if(all){ pts.forEach(function(p, j){ setPtStyle(j, patch); }); showToast('تم التطبيق على كل النقاط ('+pts.length+')'); }
+  else { setPtStyle(i, patch); showToast('تم التطبيق على هذه النقطة فقط'); }
+  store('pstyle', pstyle); renderList();
 }
 
 /* list + navigator */
@@ -288,7 +373,7 @@ document.getElementById('list').addEventListener('click', function(e){
 function goTo(i){
   if(!pts.length) return;
   idx = (i + pts.length) % pts.length;
-  var p = pts[idx];
+  var p = pts[idx]; sel = { k:'pt', i:idx }; updateSel();
   pts.forEach(function(q){ q.m.setIcon(pin(q.s.icon, q.s.color, false, q.g.count)); });
   p.m.setIcon(pin(p.s.icon, p.s.color, true, p.g.count));
   document.getElementById('cnt').textContent = (idx+1)+' من '+pts.length;
@@ -338,7 +423,8 @@ function drawAnno(){
     } else {
       var m = L.marker([a.lat, a.lon], { draggable:true, icon: a.t==='text' ? L.divIcon({ className:'', html:'<div class="tx" style="background:'+a.color+'">'+esc(a.text)+'</div>', iconSize:[0,0] }) : pin(a.icon, a.color, false, 1) });
       m.on('dragend', function(){ var p=m.getLatLng(); a.lat=p.lat; a.lon=p.lng; saveAnno(); });
-      m.bindPopup('<div class="pop"><b class="h">'+esc(a.text||'')+'</b><i style="font-size:11px;color:#6b7c88">'+a.lat.toFixed(5)+', '+a.lon.toFixed(5)+'</i><br><button class="d" onclick="delAnno('+i+')">حذف</button></div>');
+      m.on('popupopen', function(){ sel = { k:'anno', i:i }; updateSel(); });
+      m.bindPopup('<div class="pop"><b class="h">'+esc(a.text||'نقطة')+'</b><i style="font-size:11px;color:#6b7c88">'+a.lat.toFixed(5)+', '+a.lon.toFixed(5)+'</i><br><button class="d" onclick="delAnno('+i+')">حذف</button></div>');
       m.addTo(annoGroup);
     }
   });
@@ -348,7 +434,8 @@ drawAnno();
 /* tools */
 var mode = 'none', draft = [], draftGroup = L.layerGroup().addTo(map);
 function setMode(m){
-  mode = m; draft = []; draftGroup.clearLayers();
+  var prev = mode; mode = m; draft = []; draftGroup.clearLayers();
+  if(m === 'marker'){ setScope('new'); document.getElementById('pal').classList.add('open'); if(prev !== 'marker') showToast('اختر الأيقونة ثم اضغط على الخريطة لوضعها، أو اضغط ＋'); }
   document.querySelectorAll('.tl[data-m]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-m')===m); });
   document.getElementById('finish').style.display = m==='measure' ? 'flex' : 'none';
   map.getContainer().style.cursor = m==='none' ? '' : 'crosshair';
@@ -363,8 +450,7 @@ function finishLine(){
 map.on('click', function(e){
   var ll = [e.latlng.lat, e.latlng.lng];
   if(mode === 'marker'){
-    var t = prompt('اسم النقطة:', ''); if(t === null) return;
-    anno.push({ t:'marker', lat:ll[0], lon:ll[1], text:t, icon:cur.icon, color:cur.color }); saveAnno(); drawAnno();
+    anno.push({ t:'marker', lat:ll[0], lon:ll[1], text:document.getElementById('pname').value.trim(), icon:cur.icon, color:cur.color }); saveAnno(); drawAnno();
   } else if(mode === 'text'){
     var tx = prompt('اكتب النص:', ''); if(!tx) return;
     anno.push({ t:'text', lat:ll[0], lon:ll[1], text:tx, color:cur.color==='#f2a541' ? '#b97a1e' : cur.color }); saveAnno(); drawAnno();
@@ -380,10 +466,130 @@ document.getElementById('clearAnno').onclick = function(){ if(confirm('حذف ك
 var ig = document.getElementById('ig'), cg = document.getElementById('cg');
 ig.innerHTML = ICONS.map(function(c){ return '<button data-i="'+c+'" class="'+(c===cur.icon?'on':'')+'">'+c+'</button>'; }).join('');
 cg.innerHTML = COLORS.map(function(c){ return '<button data-c="'+c+'" style="background:'+c+'" class="'+(c===cur.color?'on':'')+'"></button>'; }).join('') + '<input type="color" id="cc" value="'+cur.color+'" style="width:28px;height:24px;border:0;padding:0;background:none">';
-ig.onclick = function(e){ var b=e.target.closest('button'); if(!b) return; cur.icon=b.getAttribute('data-i'); ig.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x===b); }); };
-cg.onclick = function(e){ var b=e.target.closest('button'); if(!b) return; cur.color=b.getAttribute('data-c'); cg.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x===b); }); };
+ig.onclick = function(e){ var b=e.target.closest('button'); if(!b) return; cur.icon=b.getAttribute('data-i'); ig.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x===b); }); if(scope === 'new') setMode('marker'); else applyScope({ icon:cur.icon }); };
+cg.onclick = function(e){ var b=e.target.closest('button'); if(!b) return; cur.color=b.getAttribute('data-c'); cg.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x===b); }); if(scope !== 'new') applyScope({ color:cur.color }); };
 document.getElementById('cc').oninput = function(e){ cur.color = e.target.value; };
+document.getElementById('cc').onchange = function(){ if(scope !== 'new') applyScope({ color:cur.color }); };
+document.getElementById('scope').onclick = function(e){ var b = e.target.closest('button'); if(!b) return; setScope(b.getAttribute('data-s')); if(scope !== 'new' && mode === 'marker') setMode('none'); };
 document.getElementById('palBtn').onclick = function(){ document.getElementById('pal').classList.toggle('open'); };
+
+document.getElementById('addIcon').onclick = function(){
+  var c = map.getCenter();
+  anno.push({ t:'marker', lat:c.lat, lon:c.lng, text:document.getElementById('pname').value.trim(), icon:cur.icon, color:cur.color });
+  saveAnno(); drawAnno(); showToast('تمت إضافة الأيقونة في وسط الخريطة، اسحبها للمكان المناسب');
+};
+
+/* ---------- link import: live preview ---------- */
+var lkText = document.getElementById('lkText'), lkRes = {}, lkLayer = L.layerGroup().addTo(map), lkTimer = null, lkBusy = 0, lkQueue = [], lkTry = {};
+function lkUrls(){ var m = lkText.value.match(/https?:\/\/[^\s"'<>]+/g) || []; return m.filter(function(u, i){ return m.indexOf(u) === i; }); }
+function clientParse(u){
+  var pats = [/@(-?\d+\.\d+),(-?\d+\.\d+)/, /[?&](?:q|ll|query|destination)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/, /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/];
+  for(var i = 0; i < pats.length; i++){ var m = u.match(pats[i]); if(m) return { lat:+m[1], lon:+m[2] }; }
+  return null;
+}
+function lkNoteLines(){
+  var a = document.getElementById('lkNote').value.split(/\r?\n/).map(function(x){ return x.trim(); });
+  while(a.length && !a[a.length - 1]) a.pop();
+  return a;
+}
+/* line i = note of link i; a single line = note for all links */
+function lkNoteFor(i){ var a = lkNoteLines(); return a.length === 1 ? a[0] : (a[i] || ''); }
+function lkDropNote(i){
+  if(i < 0 || lkNoteLines().length <= 1) return;
+  var el = document.getElementById('lkNote'), a = el.value.split(/\r?\n/);
+  if(i < a.length){ a.splice(i, 1); el.value = a.join('\n'); }
+}
+function lkSet(u, v){ if(lkRes[u]) lkRes[u] = v; }
+function lkPump(){
+  while(lkBusy < 2 && lkQueue.length){
+    var u = lkQueue.shift();
+    if(!lkRes[u]) continue;
+    lkBusy++;
+    (function(u){
+      fetch('/resolve', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ url:u }) })
+        .then(function(r){ return r.json(); })
+        .then(function(j){ lkSet(u, (j && j.lat != null) ? { s:'ok', lat:j.lat, lon:j.lon } : { s:'fail', d:(j && j.debug) || '' }); })
+        .catch(function(){ lkSet(u, { s:'fail' }); })
+        .then(function(){
+          if(lkRes[u] && lkRes[u].s === 'fail' && !lkTry[u]){ lkTry[u] = 1; lkRes[u] = { s:'wait' }; lkQueue.push(u); }
+          lkBusy--; lkRender(true); lkPump(); });
+    })(u);
+  }
+}
+function lkScan(){
+  var urls = lkUrls();
+  Object.keys(lkRes).forEach(function(u){ if(urls.indexOf(u) < 0){ delete lkRes[u]; delete lkTry[u]; } });
+  urls.forEach(function(u){
+    if(lkRes[u]) return;
+    var c = clientParse(u);
+    if(c) lkRes[u] = { s:'ok', lat:c.lat, lon:c.lon }; else { lkRes[u] = { s:'wait' }; lkQueue.push(u); }
+  });
+  lkRender(true); lkPump();
+}
+function lkDel(u){ lkDropNote(lkUrls().indexOf(u)); lkText.value = lkText.value.split(u).join('').replace(/\n\s*\n/g, '\n'); lkScan(); }
+function lkDelAt(i){ var u = lkUrls()[i]; if(u) lkDel(u); }
+function lkRender(fit){
+  lkLayer.clearLayers();
+  var urls = lkUrls(), ll = [], ok = 0, fail = 0, wait = 0, rows = '';
+  urls.forEach(function(u, i){
+    var r = lkRes[u] || { s:'wait' }, st = '⏳';
+    if(r.s === 'ok'){
+      ok++; st = '✅'; ll.push([r.lat, r.lon]);
+      L.marker([r.lat, r.lon], { icon:pin('<b style="font-size:13px;color:#fff">'+(i+1)+'</b>', '#d64545', false, 1) }).addTo(lkLayer)
+        .bindPopup('<div class="pop"><b class="h">رابط #'+(i+1)+'</b>'+r.lat.toFixed(5)+', '+r.lon.toFixed(5)+'<br><button class="d" onclick="lkDelAt('+i+')">إزالة</button></div>');
+    } else if(r.s === 'fail'){ fail++; st = '❌'; } else { wait++; }
+    rows += '<div class="lk"><span>'+st+'</span><b>'+(i+1)+'</b><span class="u" title="'+esc(u)+'">'+esc(u.replace(/^https?:\/\//, '').slice(0, 36))+'</span><button type="button" data-u="'+esc(u)+'" title="إزالة">✕</button></div>';
+    if(r.s === 'fail' && r.d) rows += '<div class="dbg">'+esc(r.d)+'</div>';
+    var nt = lkNoteFor(i); if(nt) rows += '<div class="lkn">'+esc(nt)+'</div>';
+  });
+  document.getElementById('lkList').innerHTML = rows;
+  document.getElementById('lkRetry').style.display = fail ? 'block' : 'none';
+  document.getElementById('lkInfo').textContent = urls.length
+    ? (ok+' نقطة جاهزة'+(wait ? ' · '+wait+' قيد المعالجة' : '')+(fail ? ' · '+fail+' تعذر قراءتها' : ''))
+    : 'الصق رابطاً وستظهر النقطة فوراً على الخريطة.';
+  if(fit && !lkBusy && !lkQueue.length && ll.length){
+    var pad = window.innerWidth > 700 ? [400, 20] : [20, window.innerHeight * 0.55];
+    try{ map.fitBounds(ll, { paddingTopLeft:[20, 20], paddingBottomRight:pad, maxZoom:17 }); }catch(e){}
+  }
+}
+lkText.addEventListener('input', function(){ clearTimeout(lkTimer); lkTimer = setTimeout(lkScan, 300); });
+document.getElementById('lkList').addEventListener('click', function(e){ var b = e.target.closest('button'); if(b) lkDel(b.getAttribute('data-u')); });
+document.getElementById('lkRetry').onclick = function(){
+  lkUrls().forEach(function(u){ if(lkRes[u] && lkRes[u].s === 'fail'){ lkRes[u] = { s:'wait' }; lkQueue.push(u); } });
+  lkRender(false); lkPump();
+};
+document.getElementById('lkClear').onclick = function(){ lkText.value = ''; document.getElementById('lkNote').value = ''; lkScan(); };
+document.getElementById('lkNote').addEventListener('input', function(){ lkRender(false); });
+function lkSave(pdf){
+  var out = [];
+  lkUrls().forEach(function(u, i){ var r = lkRes[u]; if(r && r.s === 'ok') out.push({ lat:r.lat, lon:r.lon, url:u, note:lkNoteFor(i) }); });
+  if(!out.length){ showToast('لا توجد نقاط جاهزة للحفظ'); return; }
+  if((lkBusy || lkQueue.length) && !confirm('بعض الروابط ما زالت قيد المعالجة. حفظ النقاط الجاهزة فقط؟')) return;
+  fetch('/save_links', { method:'POST', headers:{ 'Content-Type':'application/json' },
+    body:JSON.stringify({ project:document.getElementById('lkProject').value, points:out }) })
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(j.error){ showToast('انتهت الجلسة، سجّل الدخول من جديد'); return; }
+      try{ sessionStorage.setItem('toast', 'تم حفظ '+j.saved+' نقطة على الخريطة'); if(pdf) sessionStorage.setItem('autoPdf', '1'); }catch(e){}
+      location.href = '/' + location.search;
+    })
+    .catch(function(){ showToast('تعذر الحفظ، تأكد من الاتصال'); });
+}
+document.getElementById('lkSave').onclick = function(){ lkSave(false); };
+document.getElementById('lkSavePdf').onclick = function(){ lkSave(true); };
+
+/* ---------- map screenshot as image ---------- */
+document.getElementById('shot').onclick = function(){
+  var b = this, lbl = b.querySelector('small'); b.disabled = true; lbl.textContent = '...';
+  html2canvas(document.getElementById('map'), { useCORS:true, scale:2, logging:false, ignoreElements:function(el){ return el.classList && el.classList.contains('leaflet-top'); } })
+    .then(function(cv){
+      var d = new Date(), a = document.createElement('a');
+      a.download = 'map_'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2, '0')+'-'+String(d.getDate()).padStart(2, '0')+'_'+String(d.getHours()).padStart(2, '0')+'-'+String(d.getMinutes()).padStart(2, '0')+'.png';
+      a.href = cv.toDataURL('image/png'); document.body.appendChild(a); a.click(); a.remove();
+    })
+    .catch(function(){ alert('تعذر أخذ لقطة للخريطة.'); })
+    .then(function(){ b.disabled = false; lbl.textContent = 'صورة'; });
+};
 
 /* ---------- settings ---------- */
 document.getElementById('cCluster').onchange = function(e){
@@ -418,28 +624,379 @@ drop.onclick = function(){ fin.click(); }; fin.onchange = showName;
 drop.addEventListener('drop', function(e){ fin.files = e.dataTransfer.files; showName(); });
 var toast = document.getElementById('toast'); if(toast) setTimeout(function(){ toast.style.display='none'; }, 5000);
 
-/* ---------- PDF report (with distance from previous point) ---------- */
-document.getElementById('pdfBtn').onclick = function(){
-  var btn = this; btn.textContent = 'جاري التجهيز...';
-  html2canvas(document.getElementById('map'), { useCORS:true, allowTaint:true, scale:1.5, ignoreElements:function(el){ return el.classList && (el.classList.contains('leaflet-control-container')); } }).then(function(cv){
-    var title = document.getElementById('repTitle').value.trim() || 'تقرير الخريطة';
-    var rows = '', prev = null, n = 1;
-    pts.forEach(function(p){
-      var d = prev ? fmt(map.distance(prev, [p.g.lat, p.g.lon])) : '-';
-      p.g.items.forEach(function(it){
-        rows += '<tr><td>'+(n++)+'</td><td>'+esc(p.g.project)+'</td><td>'+esc(it.note)+'</td><td>'+p.g.lat.toFixed(5)+'</td><td>'+p.g.lon.toFixed(5)+'</td><td>'+esc(it.round_id||'-')+'</td><td>'+d+'</td></tr>';
-      });
-      prev = [p.g.lat, p.g.lon];
+/* ---------- PDF report: interactive (links and QR codes stay clickable) ---------- */
+var PG_W = 1123, PG_H = 794;                      /* A4 landscape @96dpi */
+var MAP_H = 660, SIDE_W = 250, MAPW_SIDE = 827, MAPW_FULL = 1089;
+var CARDS_ON_MAP = 6, CARDS_PER_PAGE = 16, ROWS_PER_PAGE = 24;
+var NOZ = 'بدون منطقة', pdfBusy = false;
+
+function goUrl(lat, lon){ return 'https://www.google.com/maps/search/?api=1&query=' + (+lat).toFixed(6) + ',' + (+lon).toFixed(6); }
+function zoneId(p){ return p.Round_ID || p.ROUND_ID || p.round_id || p.Name || p.NAME || p.name || p.Title || p.title || p.ID || Object.values(p)[0] || '-'; }
+function natCmp(a, b){ return String(a).localeCompare(String(b), undefined, { numeric:true, sensitivity:'base' }); }
+function wait(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+function nearestChain(list, from){
+  var rest = list.slice(), out = [], c = from || null;
+  while(rest.length){
+    var bi = 0, bd = Infinity;
+    if(c){
+      for(var i = 0; i < rest.length; i++){
+        var d = map.distance(c, [rest[i].lat, rest[i].lon]);
+        if(d < bd){ bd = d; bi = i; }
+      }
+    }
+    var r = rest.splice(bi, 1)[0];
+    out.push(r); c = [r.lat, r.lon];
+  }
+  return out;
+}
+
+/* Cairo is loaded lazily by unicode-range: make sure it is ready before measuring/capturing */
+function ensureFonts(){
+  if(!document.fonts || !document.fonts.load) return wait(300);
+  var sample = 'نقطة رقم اذهب للموقع المشروع ملاحظة 0123456789';
+  return Promise.all(['400', '600', '700'].map(function(w){ return document.fonts.load(w + ' 14px Cairo', sample); }))
+    .then(function(){ return document.fonts.ready; }).then(function(){ return wait(150); }).catch(function(){});
+}
+
+/* QR code as a data URL */
+function qrData(text){
+  if(typeof QRCode === 'undefined') return '';
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;left:0;top:0;z-index:-1';
+  document.body.appendChild(d);
+  var url = '';
+  try{
+    new QRCode(d, { text:text, width:240, height:240, colorDark:'#000000', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M });
+    var cv = d.querySelector('canvas');
+    url = cv ? cv.toDataURL('image/png') : ((d.querySelector('img') || {}).src || '');
+  }catch(e){ url = ''; }
+  d.remove();
+  return url;
+}
+
+/* unsaved links pasted in the "add" tab are treated exactly like an uploaded file */
+function waitLinks(){
+  return new Promise(function(res){
+    var t0 = Date.now();
+    (function chk(){
+      if((!lkBusy && !lkQueue.length) || Date.now() - t0 > 90000) return res();
+      showToast('بانتظار قراءة الروابط الملصوقة...'); setTimeout(chk, 500);
+    })();
+  });
+}
+function ringHas(r, x, y){
+  var inside = false;
+  for(var i = 0, j = r.length - 1; i < r.length; j = i++){
+    var xi = r[i][0], yi = r[i][1], xj = r[j][0], yj = r[j][1];
+    if(((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function polyHas(p, x, y){
+  if(!ringHas(p[0], x, y)) return false;
+  for(var k = 1; k < p.length; k++) if(ringHas(p[k], x, y)) return false;
+  return true;
+}
+function zoneOfPoint(lat, lon){
+  if(!SHAPES) return null;
+  for(var i = 0; i < SHAPES.features.length; i++){
+    var f = SHAPES.features[i], g = f.geometry; if(!g) continue;
+    var polys = g.type === 'Polygon' ? [g.coordinates] : (g.type === 'MultiPolygon' ? g.coordinates : []);
+    for(var j = 0; j < polys.length; j++){
+      if(polyHas(polys[j], lon, lat)) return { zone:String(zoneId(f.properties)), project:f.properties.parent_project_name };
+    }
+  }
+  return null;
+}
+
+/* Report rows: grouped by zone, nearest-neighbour order, numbered 1..N (same numbers on map, cards and table) */
+function buildEntries(){
+  var groups = {};
+  function add(z, o){ (groups[z] = groups[z] || []).push(o); }
+  pts.forEach(function(p){
+    p.g.items.forEach(function(it){
+      var z = (it.round_id && it.round_id !== '-') ? it.round_id : NOZ;
+      add(z, { lat:p.g.lat, lon:p.g.lon, project:(p.g.project || '').trim() || '-', note:it.note, zone:z, color:p.s.color });
     });
-    var el = document.createElement('div');
-    el.innerHTML = '<div dir="rtl" style="font-family:Cairo,Tahoma,sans-serif;padding:8px"><h2 style="text-align:center;font-size:16px;margin:0 0 6px">'+esc(title)+'</h2>'+
-      '<div style="text-align:center;font-size:10px;color:#6b7c88;margin-bottom:8px;direction:ltr">'+new Date().toLocaleString('en-GB')+'</div>'+
-      '<img src="'+cv.toDataURL('image/png')+'" style="width:100%;max-height:320px;object-fit:contain;border:1px solid #ccc;border-radius:6px">'+
-      '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:9px"><thead><tr style="background:#14212b;color:#fff"><th>م</th><th>المشروع</th><th>ملاحظة</th><th>Lat</th><th>Lon</th><th>منطقة الإشراف</th><th>المسافة من السابقة</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
-    el.querySelectorAll('td,th').forEach(function(c){ c.style.border='1px solid #ddd'; c.style.padding='4px 6px'; c.style.textAlign='right'; });
-    html2pdf().from(el).set({ margin:5, filename:title+'.pdf', image:{ type:'jpeg', quality:.9 }, html2canvas:{ scale:2 }, jsPDF:{ unit:'mm', format:'a4', orientation:'landscape' } }).save().then(function(){ btn.textContent='تحميل التقرير PDF'; });
-  }).catch(function(){ alert('تعذر أخذ لقطة للخريطة.'); btn.textContent='تحميل التقرير PDF'; });
-};
+  });
+  anno.forEach(function(a){
+    if(a.t === 'marker' && a.lat != null) add(NOZ, { lat:a.lat, lon:a.lon, project:'رسوماتي', note:a.text || 'نقطة', zone:NOZ, color:a.color });
+  });
+  lkUrls().forEach(function(u, i){
+    var r = lkRes[u]; if(!r || r.s !== 'ok') return;
+    var zp = zoneOfPoint(r.lat, r.lon), z = zp ? zp.zone : NOZ;
+    var pj = (zp && (zp.project || '').trim()) || document.getElementById('lkProject').value.trim() || '-';
+    add(z, { lat:r.lat, lon:r.lon, project:pj, note:lkNoteFor(i) || 'موقع من رابط خرائط', zone:z, color:'#8e44ad', fromLink:true });
+  });
+  var zones = Object.keys(groups).sort(function(a, b){ if(a === NOZ) return 1; if(b === NOZ) return -1; return natCmp(a, b); });
+  var out = [], prev = null, n = 1;
+  zones.forEach(function(z){
+    nearestChain(groups[z], prev).forEach(function(r){
+      r.n = n++;
+      r.dist = prev ? fmt(map.distance(prev, [r.lat, r.lon])) : '-';
+      r.url = goUrl(r.lat, r.lon);
+      prev = [r.lat, r.lon];
+      out.push(r);
+    });
+  });
+  return out;
+}
+
+/* Renders the report map on a hidden map of its own: same base layer the user picked, numbered pins, zones, drawings */
+function renderReportMap(entries, w, h){
+  return new Promise(function(resolve, reject){
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;left:0;top:0;width:' + w + 'px;height:' + h + 'px;z-index:-1;background:#e5ebee;direction:ltr';
+    document.body.appendChild(box);
+    var rm = L.map(box, { zoomControl:false, attributionControl:false, fadeAnimation:false, zoomAnimation:false, markerZoomAnimation:false, inertia:false, preferCanvas:true });
+    var finished = false;
+    function fail(e){ if(finished) return; finished = true; try{ rm.remove(); }catch(_){} box.remove(); reject(e); }
+    try{
+      var ll = [];
+      entries.forEach(function(e){ ll.push([e.lat, e.lon]); });
+      anno.forEach(function(a){
+        if(a.t === 'line') a.pts.forEach(function(p){ ll.push(p); });
+        else if(a.t === 'text' && a.lat != null) ll.push([a.lat, a.lon]);
+      });
+      var ext = document.getElementById('repExtent').value;
+      if(ext === 'view' || !ll.length){
+        if(ext !== 'view' && !ll.length && shapeLayer){
+          try{ rm.fitBounds(shapeLayer.getBounds(), { animate:false }); }catch(e){ rm.fitBounds(map.getBounds(), { animate:false }); }
+        } else rm.fitBounds(map.getBounds(), { animate:false });
+      } else rm.fitBounds(ll, { padding:[60, 60], maxZoom:17, animate:false });
+
+      /* base layer: the one selected on the live map */
+      var tiles = activeBase === 'sat' ? mkSat() : [mkStreet(false)];
+      var pending = tiles.length, started = false;
+      function proceed(){ if(started) return; started = true; setTimeout(capture, 600); }
+      tiles.forEach(function(t){ t.once('load', function(){ if(--pending <= 0) proceed(); }); t.addTo(rm); });
+      setTimeout(proceed, 15000);
+
+      /* supervision zones */
+      if(SHAPES && document.getElementById('cZones').checked){
+        var sl = L.geoJSON(SHAPES, {
+          interactive:false,
+          style:function(f){ var c = cmap[f.properties.parent_project_name || ' ']; return { color:c, weight:2.5, fillColor:c, fillOpacity:.22 }; }
+        }).addTo(rm);
+        if(document.getElementById('cZN').checked){
+          sl.eachLayer(function(l){ try{ label('tx', esc(zoneId(l.feature.properties)), l.getBounds().getCenter()).addTo(rm); }catch(e){} });
+        }
+      }
+
+      /* user drawings (lines + text); drawn markers are numbered like the other points */
+      var grp = L.layerGroup().addTo(rm);
+      anno.forEach(function(a){
+        if(a.t === 'line'){
+          var total = drawPath(a.pts, grp, a.color);
+          L.marker(a.pts[a.pts.length - 1], { interactive:false, icon:L.divIcon({ className:'', iconSize:[0, 0],
+            html:'<div class="dl" style="background:#14212b;color:#fff;border-color:#14212b">المجموع ' + fmt(total) + '</div>' }) }).addTo(grp);
+        } else if(a.t === 'text'){
+          L.marker([a.lat, a.lon], { interactive:false, icon:L.divIcon({ className:'', iconSize:[0, 0], html:'<div class="tx" style="background:' + a.color + '">' + esc(a.text) + '</div>' }) }).addTo(grp);
+        }
+      });
+
+      /* numbered pins (one per distinct coordinate; badge shows how many reports share it) */
+      var byKey = {}, markers = [];
+      entries.forEach(function(e){ var k = e.lat.toFixed(6) + ',' + e.lon.toFixed(6); (byKey[k] = byKey[k] || []).push(e); });
+      Object.keys(byKey).forEach(function(k){
+        var g = byKey[k], e = g[0], t = String(e.n), fs = t.length > 2 ? 10 : 13;
+        var m = L.marker([e.lat, e.lon], { interactive:false, keyboard:false,
+          icon:pin('<b style="font-size:' + fs + 'px;color:#fff;font-weight:700">' + t + '</b>', e.color, false, g.length) }).addTo(rm);
+        markers.push({ m:m, url:e.url });
+      });
+
+      function capture(){
+        if(finished) return;
+        try{
+          var br = box.getBoundingClientRect(), links = [];
+          markers.forEach(function(o){
+            var el = o.m._icon; if(!el) return;
+            var r = el.getBoundingClientRect();
+            links.push({ x:r.left - br.left, y:r.top - br.top, w:r.width, h:r.height, url:o.url });
+          });
+          html2canvas(box, { useCORS:true, scale:2.5, logging:false, backgroundColor:'#e5ebee', windowWidth:w + 80, windowHeight:h + 80 })
+            .then(function(cv){
+              var img = cv.toDataURL('image/jpeg', 0.92); cv.width = cv.height = 0;
+              finished = true; rm.remove(); box.remove();
+              resolve({ img:img, links:links });
+            })
+            .catch(fail);
+        }catch(e){ fail(e); }
+      }
+    }catch(e){ fail(e); }
+  });
+}
+
+/* ---------- page templates ---------- */
+var RPT_CSS = '<style>' +
+  '.rpt{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px}' +
+  '.rpt th{background:#14212b;color:#fff;height:30px;padding:0 7px;border:1px solid #14212b;text-align:right;font-weight:700}' +
+  '.rpt td{height:26px;padding:0 7px;border:1px solid #d5dde0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;line-height:18px}' +
+  '.rpt td.c{text-align:center}' +
+  '.rpt .go{display:inline-block;background:#0f8b8d;color:#fff;border-radius:6px;padding:0 12px;line-height:20px;font-weight:700;font-size:11px}' +
+  '</style>';
+
+function pageEl(inner){
+  var d = document.createElement('div');
+  d.setAttribute('dir', 'rtl');
+  d.style.cssText = 'position:absolute;left:0;top:0;width:' + PG_W + 'px;height:' + PG_H + 'px;overflow:hidden;background:#fff;padding:14px 16px;box-sizing:border-box;font-family:Cairo,Tahoma,sans-serif;color:#14212b;line-height:1.35';
+  d.innerHTML = RPT_CSS + inner;
+  return d;
+}
+function footerHtml(i, total, attrib){
+  return '<div style="position:absolute;left:16px;right:16px;bottom:6px;display:flex;justify-content:space-between;direction:ltr;font-size:9px;color:#8a99a3">' +
+    '<span>Designed By Ahmed Saif Alashry</span><span>' + attrib + '</span><span dir="rtl">صفحة ' + i + ' / ' + total + '</span></div>';
+}
+function goBtn(url, extra){
+  return '<div data-url="' + esc(url) + '" style="background:#0f8b8d;color:#fff;border-radius:7px;line-height:22px;text-align:center;font-size:11px;font-weight:700;' + (extra || '') + '">اذهب للموقع</div>';
+}
+function sideCard(e, qr){
+  return '<div style="height:98px;box-sizing:border-box;border:1px solid #cfdadd;border-radius:10px;padding:6px 8px;display:flex;direction:ltr;gap:8px;align-items:center;background:#fff">' +
+    (qr ? '<img data-url="' + esc(e.url) + '" src="' + qr + '" style="width:84px;height:84px;flex:none;display:block">' : '') +
+    '<div dir="rtl" style="flex:1;min-width:0;text-align:right">' +
+      '<div style="font-weight:700;font-size:14px;color:#0b6e70;white-space:nowrap">نقطة رقم ' + e.n + '</div>' +
+      '<div style="font-size:10px;color:#6b7c88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">' + esc(e.note) + '</div>' +
+      goBtn(e.url, 'margin-top:6px') +
+    '</div></div>';
+}
+function gridCard(e, qr){
+  return '<div style="box-sizing:border-box;border:1px solid #cfdadd;border-radius:10px;padding:6px 8px;text-align:center;overflow:hidden;background:#fff">' +
+    '<div style="font-weight:700;font-size:14px;color:#0b6e70;line-height:20px">نقطة رقم ' + e.n + '</div>' +
+    (qr ? '<img data-url="' + esc(e.url) + '" src="' + qr + '" style="width:88px;height:88px;display:block;margin:2px auto">' : '<div style="height:92px"></div>') +
+    '<div style="font-size:10px;color:#6b7c88;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:14px">' + esc(e.note) + '</div>' +
+    goBtn(e.url, 'margin-top:4px') +
+  '</div>';
+}
+function tableRows(rows, offset){
+  return rows.map(function(r, i){
+    return '<tr style="background:' + ((offset + i) % 2 ? '#f5f8f8' : '#fff') + '">' +
+      '<td class="c">' + r.n + '</td><td>' + esc(r.project) + '</td><td>' + esc(r.note) + '</td>' +
+      '<td class="c" dir="ltr">' + r.lat.toFixed(5) + '</td><td class="c" dir="ltr">' + r.lon.toFixed(5) + '</td>' +
+      '<td>' + esc(r.zone) + '</td><td>' + esc(r.dist) + '</td>' +
+      '<td class="c"><span class="go" data-url="' + esc(r.url) + '">اذهب للموقع</span></td></tr>';
+  }).join('');
+}
+var TABLE_HEAD = '<colgroup><col style="width:44px"><col style="width:160px"><col style="width:280px"><col style="width:95px"><col style="width:95px"><col style="width:150px"><col style="width:120px"><col style="width:147px"></colgroup>' +
+  '<thead><tr><th>م</th><th>المشروع</th><th>ملاحظة</th><th>Lat</th><th>Lon</th><th>منطقة الإشراف</th><th>المسافة من السابقة</th><th>الموقع</th></tr></thead>';
+
+/* ---------- build + export ---------- */
+async function makePdf(){
+  if(pdfBusy) return;
+  var btn = document.getElementById('pdfBtn'), fab = document.getElementById('pdfFab'), fl = fab.querySelector('small');
+  var btnTxt = btn.textContent;
+  function prog(t){ btn.textContent = t; fl.textContent = '...'; showToast(t); }
+  pdfBusy = true; btn.disabled = true; fab.disabled = true;
+  var stage = document.createElement('div');
+  stage.style.cssText = 'position:fixed;left:0;top:0;width:' + PG_W + 'px;height:' + PG_H + 'px;z-index:-1;pointer-events:none';
+  document.body.appendChild(stage);
+  try{
+    if(!window.jspdf || !window.jspdf.jsPDF) throw new Error('تعذر تحميل مكتبة PDF، تأكد من الاتصال بالإنترنت');
+    await waitLinks();
+    var entries = buildEntries();
+    if(!entries.length){ showToast('لا توجد نقاط لإنشاء التقرير. أضف نقاطاً أو الصق روابط أولاً.'); return; }
+    var nLinks = entries.filter(function(e){ return e.fromLink; }).length;
+    if(nLinks) showToast('تم تضمين ' + nLinks + ' نقطة من الروابط الملصوقة (بدون حفظ)');
+    var title = document.getElementById('repTitle').value.trim() || 'تقرير الخريطة';
+    var sideOn = document.getElementById('repQR').checked;
+    var sat = activeBase === 'sat';
+    var zonesCount = {}; entries.forEach(function(e){ if(e.zone !== NOZ) zonesCount[e.zone] = 1; });
+
+    prog('جاري تجهيز الخريطة...');
+    await ensureFonts();
+    var mw = sideOn ? MAPW_SIDE : MAPW_FULL;
+    var rep = await renderReportMap(entries, mw, MAP_H);
+
+    var restList = sideOn ? entries.slice(CARDS_ON_MAP) : [];
+    var qrPages = Math.ceil(restList.length / CARDS_PER_PAGE);
+    var tPages = Math.max(1, Math.ceil(entries.length / ROWS_PER_PAGE));
+    var total = 1 + qrPages + tPages, pageNo = 0;
+    var attrib = sat ? 'Imagery © Esri, Maxar, Earthstar Geographics' : 'Map data © OpenStreetMap contributors';
+
+    var pdf = new window.jspdf.jsPDF({ orientation:'landscape', unit:'mm', format:'a4', compress:true });
+    pdf.setProperties({ title:title });
+    var K = 297 / PG_W;
+
+    var addPage = async function(inner, mapLinks){
+      pageNo++;
+      prog('جاري تصدير الصفحة ' + pageNo + ' / ' + total + '...');
+      var el = pageEl(inner + footerHtml(pageNo, total, attrib));
+      stage.appendChild(el);
+      await wait(120);
+      var base = el.getBoundingClientRect(), links = [];
+      el.querySelectorAll('[data-url]').forEach(function(n){
+        var r = n.getBoundingClientRect();
+        links.push({ x:r.left - base.left, y:r.top - base.top, w:r.width, h:r.height, url:n.getAttribute('data-url') });
+      });
+      if(mapLinks){
+        var ms = el.querySelector('.mapslot').getBoundingClientRect();
+        mapLinks.forEach(function(l){
+          var x = Math.max(0, l.x), y = Math.max(0, l.y), x2 = Math.min(mw, l.x + l.w), y2 = Math.min(MAP_H, l.y + l.h);
+          if(x2 > x && y2 > y) links.push({ x:ms.left - base.left + x, y:ms.top - base.top + y, w:x2 - x, h:y2 - y, url:l.url });
+        });
+      }
+      var cv = await html2canvas(el, { scale:2, useCORS:true, backgroundColor:'#ffffff', logging:false, windowWidth:PG_W + 80, windowHeight:PG_H + 80 });
+      if(pageNo > 1) pdf.addPage('a4', 'landscape');
+      pdf.addImage(cv.toDataURL('image/jpeg', 0.93), 'JPEG', 0, 0, 297, 210, undefined, 'FAST');
+      cv.width = cv.height = 0;
+      links.forEach(function(l){ pdf.link(l.x * K, l.y * K, l.w * K, l.h * K, { url:l.url }); });
+      el.remove();
+    };
+
+    /* page 1: map (+ QR cards on the far left) */
+    var meta = '<span dir="ltr" style="display:inline-block">' + new Date().toLocaleString('en-GB') + '</span> — عدد البلاغات: ' + entries.length +
+      ' — عدد مناطق الإشراف: ' + Object.keys(zonesCount).length + ' — نوع الخريطة: ' + (sat ? 'قمر صناعي' : 'خريطة الشوارع');
+    var side = '';
+    if(sideOn){
+      var first = entries.slice(0, CARDS_ON_MAP);
+      side = '<div style="width:' + SIDE_W + 'px;height:' + MAP_H + 'px;display:flex;flex-direction:column;gap:6px;flex:none">' +
+        first.map(function(e){ return sideCard(e, qrData(e.url)); }).join('') +
+        (restList.length ? '<div style="font-size:11px;color:#6b7c88;text-align:center;margin-top:2px">+ ' + restList.length + ' نقطة أخرى (أكواد QR في الصفحات التالية)</div>' : '') +
+        '</div>';
+    }
+    await addPage(
+      '<h2 style="text-align:center;font-size:20px;margin:0 0 2px;font-weight:700">' + esc(title) + '</h2>' +
+      '<div style="text-align:center;font-size:11px;color:#6b7c88;margin-bottom:8px">' + meta + '</div>' +
+      '<div style="display:flex;direction:ltr;gap:12px;align-items:flex-start">' + side +
+        '<div style="border:1px solid #b9c6cb;border-radius:8px;overflow:hidden;flex:none;width:' + (mw + 2) + 'px;height:' + (MAP_H + 2) + 'px">' +
+          '<img class="mapslot" src="' + rep.img + '" style="width:' + mw + 'px;height:' + MAP_H + 'px;display:block"></div>' +
+      '</div>', rep.links);
+    rep.img = null;
+
+    /* QR pages for the remaining points */
+    for(var q = 0; q < qrPages; q++){
+      var chunk = restList.slice(q * CARDS_PER_PAGE, (q + 1) * CARDS_PER_PAGE);
+      await addPage(
+        '<div style="font-size:15px;font-weight:700;line-height:24px">أكواد QR للمواقع (' + (q + 1) + ' / ' + qrPages + ')</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:170px;gap:8px;margin-top:6px">' +
+          chunk.map(function(e){ return gridCard(e, qrData(e.url)); }).join('') + '</div>');
+    }
+
+    /* data table pages */
+    for(var t = 0; t < tPages; t++){
+      var rows = entries.slice(t * ROWS_PER_PAGE, (t + 1) * ROWS_PER_PAGE);
+      await addPage(
+        '<div style="font-size:15px;font-weight:700;line-height:24px;margin-bottom:4px">جدول البيانات (' + (t + 1) + ' / ' + tPages + ')</div>' +
+        '<table class="rpt">' + TABLE_HEAD + '<tbody>' + tableRows(rows, t * ROWS_PER_PAGE) + '</tbody></table>');
+    }
+
+    pdf.save(title.replace(/[\\\/:*?"<>|]+/g, '-') + '.pdf');
+    showToast('تم تجهيز ملف PDF التفاعلي');
+  } catch(e){
+    console.error(e);
+    alert('تعذر إنشاء ملف PDF: ' + ((e && e.message) || e));
+  } finally {
+    stage.remove();
+    btn.textContent = btnTxt; fl.textContent = 'PDF';
+    btn.disabled = false; fab.disabled = false; pdfBusy = false;
+  }
+}
+document.getElementById('pdfBtn').onclick = makePdf;
+document.getElementById('pdfFab').onclick = makePdf;
+
+try{
+  var tm = sessionStorage.getItem('toast'); if(tm){ sessionStorage.removeItem('toast'); showToast(tm); }
+  if(sessionStorage.getItem('autoPdf')){ sessionStorage.removeItem('autoPdf'); setTimeout(makePdf, 3000); }
+}catch(e){}
 
 /* ---------- initial view ---------- */
 if(ST){

@@ -1,10 +1,11 @@
 import collections
+import functools
 import json
 import os
 import re
 import tempfile
 import uuid
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from flask import (
     Flask,
@@ -22,13 +23,15 @@ import requests
 from shapely.geometry import Point
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here_change_this'
+# Override these in production:  SECRET_KEY / APP_USERNAME / APP_PASSWORD
+app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here_change_this')
 UPLOAD_FOLDER = '.'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB uploads
 
-USERNAME = 'admin'
-PASSWORD = '123'
+USERNAME = os.environ.get('APP_USERNAME', 'admin')
+PASSWORD = os.environ.get('APP_PASSWORD', '123')
 
 COORD_PATTERNS = [
     r'@(-?\d+\.\d+),(-?\d+\.\d+)',
@@ -48,6 +51,16 @@ def _find_coords(text):
   return None
 
 
+def _is_map_host(url):
+  try:
+    host = (urlparse(url).hostname or '').lower()
+  except Exception:
+    return False
+  if re.search(r'(^|\.)google\.[a-z]{2,3}(\.[a-z]{2})?$', host):
+    return True
+  return host in ('goo.gl', 'g.co') or host.endswith(('.goo.gl', '.g.co'))
+
+
 def get_real_coordinates_from_url(short_url):
   if not short_url or 'http' not in short_url:
     return None, None
@@ -55,6 +68,9 @@ def get_real_coordinates_from_url(short_url):
   found = _find_coords(short_url)
   if found:
     return found
+
+  if not _is_map_host(short_url):
+    return None, None
 
   headers = {
       'User-Agent': (
@@ -162,159 +178,115 @@ def save_chunks(chunks):
     pass
 
 
+SHAPES_DIR = os.path.join(UPLOAD_FOLDER, 'shapes')
+
+
+def _iter_shp_files():
+  if not os.path.isdir(SHAPES_DIR):
+    return
+  for root, _dirs, files in os.walk(SHAPES_DIR):
+    for file in sorted(files):
+      if file.lower().endswith('.shp'):
+        yield os.path.join(root, file)
+
+
+def _project_display_name(shp_path):
+  folder_name = os.path.basename(os.path.dirname(shp_path))
+  if folder_name and folder_name != 'shapes':
+    return folder_name
+  proj_name = os.path.splitext(os.path.basename(shp_path))[0]
+  return proj_name.replace('_', ' ').replace('&', ' & ').title()
+
+
+@functools.lru_cache(maxsize=16)
+def _read_shp_cached(path, mtime):
+  # mtime is part of the cache key, so edited files are reloaded automatically.
+  gdf = gpd.read_file(path)
+  if gdf.crs is not None and gdf.crs != 'EPSG:4326':
+    gdf = gdf.to_crs(epsg=4326)
+  return gdf
+
+
+def _read_shp(path):
+  return _read_shp_cached(path, os.path.getmtime(path))
+
+
+@functools.lru_cache(maxsize=16)
+def _shp_features_cached(path, mtime):
+  gdf = _read_shp_cached(path, mtime)
+  display = _project_display_name(path)
+  geom_col = gdf.geometry.name
+  feats = []
+  for _, row in gdf.iterrows():
+    geom = row[geom_col]
+    if geom is None or geom.is_empty:
+      continue
+    props = {
+        str(k): (str(v) if pd.notna(v) else '')
+        for k, v in row.drop(geom_col).to_dict().items()
+    }
+    props['parent_project_name'] = display
+    feats.append({
+        'type': 'Feature',
+        'geometry': geom.__geo_interface__,
+        'properties': props,
+    })
+  return tuple(feats)
+
+
+def _resolve_shp_path(proj_id):
+  base = os.path.realpath(SHAPES_DIR)
+  candidate = os.path.realpath(os.path.join(SHAPES_DIR, proj_id))
+  # Never leave the shapes folder (path traversal through ?shape_proj=../..).
+  if candidate.startswith(base + os.sep) and os.path.isfile(candidate):
+    return candidate
+  for path in _iter_shp_files():
+    rel_dir = os.path.relpath(os.path.dirname(path), SHAPES_DIR)
+    if proj_id in os.path.basename(path) or proj_id in rel_dir:
+      return path
+  return None
+
+
+def _selected_shp_paths(proj_id):
+  if not proj_id or proj_id == 'ALL':
+    return list(_iter_shp_files())
+  path = _resolve_shp_path(proj_id)
+  return [path] if path else []
+
+
 def get_available_shapefiles():
-  shapes_dir = os.path.join(UPLOAD_FOLDER, 'shapes')
-  shapefiles_list = []
-  seen_names = set()
-  if os.path.exists(shapes_dir):
-    for root, dirs, files in os.walk(shapes_dir):
-      for file in files:
-        if file.endswith('.shp'):
-          rel_path = os.path.relpath(os.path.join(root, file), shapes_dir)
-          folder_name = os.path.basename(root)
-
-          if folder_name and folder_name != 'shapes':
-            display_name = folder_name
-          else:
-            proj_name = os.path.splitext(file)[0]
-            display_name = proj_name.replace('_', ' ').replace('&', ' & ').title()
-
-          if display_name not in seen_names:
-            seen_names.add(display_name)
-            shapefiles_list.append({
-                'id': rel_path.replace('\\', '/'),
-                'name': display_name,
-            })
-  return shapefiles_list
+  result, seen = [], set()
+  for path in _iter_shp_files():
+    name = _project_display_name(path)
+    if name in seen:
+      continue
+    seen.add(name)
+    result.append({
+        'id': os.path.relpath(path, SHAPES_DIR).replace('\\', '/'),
+        'name': name,
+    })
+  return result
 
 
 def load_shapefile_as_geojson(proj_id):
-  shapes_dir = os.path.join(UPLOAD_FOLDER, 'shapes')
-  features_list = []
-
-  if not proj_id or proj_id == 'ALL':
-    if os.path.exists(shapes_dir):
-      for root, dirs, files in os.walk(shapes_dir):
-        for file in files:
-          if file.endswith('.shp'):
-            try:
-              gdf = gpd.read_file(os.path.join(root, file))
-              if gdf.crs != 'EPSG:4326':
-                gdf = gdf.to_crs(epsg=4326)
-
-              folder_name = os.path.basename(root)
-              if folder_name and folder_name != 'shapes':
-                proj_display = folder_name
-              else:
-                proj_display = os.path.splitext(file)[0].replace('_', ' ').title()
-
-              for _, row in gdf.iterrows():
-                geom_json = row['geometry'].__geo_interface__
-                props = row.drop('geometry').to_dict()
-                props = {
-                    str(k): (
-                        str(v)
-                        if pd.notna(v)
-                        else ''
-                    )
-                    for k, v in props.items()
-                }
-                props['parent_project_name'] = proj_display
-                features_list.append({
-                    'type': 'Feature',
-                    'geometry': geom_json,
-                    'properties': props,
-                })
-            except Exception as e:
-              print(f'Error reading shp: {e}')
-    if features_list:
-      return {'type': 'FeatureCollection', 'features': features_list}
-    return None
-
-  shp_path = os.path.join(shapes_dir, proj_id)
-  if not os.path.exists(shp_path):
-    for root, dirs, files in os.walk(shapes_dir):
-      for file in files:
-        if file.endswith('.shp') and (
-            proj_id in file or proj_id in os.path.relpath(root, shapes_dir)
-        ):
-          shp_path = os.path.join(root, file)
-          break
-
-  if os.path.exists(shp_path):
+  features = []
+  for path in _selected_shp_paths(proj_id):
     try:
-      gdf = gpd.read_file(shp_path)
-      if gdf.crs != 'EPSG:4326':
-        gdf = gdf.to_crs(epsg=4326)
-
-      folder_name = os.path.basename(os.path.dirname(shp_path))
-      if folder_name and folder_name != 'shapes':
-        proj_display = folder_name
-      else:
-        proj_display = os.path.splitext(os.path.basename(shp_path))[0].replace('_', ' ').title()
-
-      for _, row in gdf.iterrows():
-        geom_json = row['geometry'].__geo_interface__
-        props = row.drop('geometry').to_dict()
-        props = {
-            str(k): (
-                str(v)
-                if pd.notna(v)
-                else ''
-            )
-            for k, v in props.items()
-        }
-        props['parent_project_name'] = proj_display
-        features_list.append({
-            'type': 'Feature',
-            'geometry': geom_json,
-            'properties': props,
-        })
-      return {'type': 'FeatureCollection', 'features': features_list}
+      features.extend(_shp_features_cached(path, os.path.getmtime(path)))
     except Exception as e:
-      print('Error loading specific shapefile:', e)
+      print(f'Error reading shp {path}: {e}')
+  if features:
+    return {'type': 'FeatureCollection', 'features': features}
   return None
 
 
 def enrich_locations_with_shape_data(locations, proj_id):
-  shapes_dir = os.path.join(UPLOAD_FOLDER, 'shapes')
   gdfs = []
-
-  if proj_id and proj_id != 'ALL':
-    shp_path = os.path.join(shapes_dir, proj_id)
-    if not os.path.exists(shp_path):
-      for root, dirs, files in os.walk(shapes_dir):
-        for file in files:
-          if file.endswith('.shp') and (
-              proj_id in file or proj_id in os.path.relpath(root, shapes_dir)
-          ):
-            shp_path = os.path.join(root, file)
-            break
-    if os.path.exists(shp_path):
-      try:
-        gdf = gpd.read_file(shp_path)
-        if gdf.crs != 'EPSG:4326':
-          gdf = gdf.to_crs(epsg=4326)
-        folder_name = os.path.basename(os.path.dirname(shp_path))
-        proj_display = folder_name if (folder_name and folder_name != 'shapes') else os.path.splitext(os.path.basename(shp_path))[0].replace('_', ' ').title()
-        gdfs.append((gdf, proj_display))
-      except Exception:
-        pass
-  else:
-    if os.path.exists(shapes_dir):
-      for root, dirs, files in os.walk(shapes_dir):
-        for file in files:
-          if file.endswith('.shp'):
-            try:
-              full_shp_path = os.path.join(root, file)
-              gdf = gpd.read_file(full_shp_path)
-              if gdf.crs != 'EPSG:4326':
-                gdf = gdf.to_crs(epsg=4326)
-              folder_name = os.path.basename(root)
-              proj_display = folder_name if (folder_name and folder_name != 'shapes') else os.path.splitext(file)[0].replace('_', ' ').title()
-              gdfs.append((gdf, proj_display))
-            except Exception:
-              pass
+  for path in _selected_shp_paths(proj_id):
+    try:
+      gdfs.append((_read_shp(path), _project_display_name(path)))
+    except Exception:
+      pass
 
   for loc in locations:
     lat = loc.get('lat')
@@ -322,32 +294,35 @@ def enrich_locations_with_shape_data(locations, proj_id):
     round_id_val = '-'
     matched_project = None
 
-    if lat and lon:
+    if lat is not None and lon is not None:
       pt = Point(lon, lat)
       for gdf, proj_name in gdfs:
         try:
           possible_matches_index = list(gdf.sindex.intersection(pt.bounds))
-          if possible_matches_index:
-            possible_matches = gdf.iloc[possible_matches_index]
-            matched = possible_matches[possible_matches.contains(pt)]
-            if not matched.empty:
-              matched_project = proj_name
-              props = matched.iloc[0]
-              for col in props.index:
-                if any(k in col.lower() for k in ['round_id', 'roundid', 'round']):
-                  val = props[col]
-                  if pd.notna(val) and str(val).strip() != '':
-                    round_id_val = str(val)
-                    break
-              if round_id_val == '-':
-                for col in props.index:
-                  if any(k in col.lower() for k in ['id', 'name', 'title']):
-                    val = props[col]
-                    if pd.notna(val) and str(val).strip() != '':
-                      round_id_val = str(val)
-                      break
-              if matched_project:
+          if not possible_matches_index:
+            continue
+          possible_matches = gdf.iloc[possible_matches_index]
+          matched = possible_matches[possible_matches.contains(pt)]
+          if matched.empty:
+            continue
+          matched_project = proj_name
+          props = matched.iloc[0]
+          geom_name = gdf.geometry.name
+          cols = [c for c in props.index if c != geom_name]
+          for col in cols:
+            if any(k in str(col).lower() for k in ['round_id', 'roundid', 'round']):
+              val = props[col]
+              if pd.notna(val) and str(val).strip() != '':
+                round_id_val = str(val)
                 break
+          if round_id_val == '-':
+            for col in cols:
+              if any(k in str(col).lower() for k in ['id', 'name', 'title']):
+                val = props[col]
+                if pd.notna(val) and str(val).strip() != '':
+                  round_id_val = str(val)
+                  break
+          break
         except Exception:
           pass
 
@@ -367,9 +342,14 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
   try:
     df = pd.read_excel(file_path)
   except Exception:
-    try:
-      df = pd.read_csv(file_path)
-    except Exception:
+    df = None
+    for enc in ('utf-8-sig', 'cp1256', 'latin-1'):
+      try:
+        df = pd.read_csv(file_path, encoding=enc)
+        break
+      except Exception:
+        continue
+    if df is None:
       return 0
 
   if df.empty or len(df.columns) == 0:
@@ -379,19 +359,19 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
 
   for col in df.columns:
     c = str(col).strip().lower()
-    if any(k in c for k in ['lat', 'latitude', 'خط العرض', 'خط_العرض', 'العرض', 'y', 'lat.']):
+    if any(k in c for k in ['lat', 'latitude', 'خط العرض', 'خط_العرض', 'العرض', 'lat.']):
       if not any(x in c for x in ['long', 'lon', 'الطول', 'خط الطول']):
         lat_col = col
-    elif any(k in c for k in ['lon', 'long', 'longitude', 'خط الطول', 'خط_الطول', 'الطول', 'x', 'lon.', 'long.', 'location', 'loc']):
+    elif any(k in c for k in ['lon', 'long', 'longitude', 'خط الطول', 'خط_الطول', 'الطول', 'lon.', 'long.']):
       lon_col = col
     elif any(k in c for k in ['url', 'link', 'رابط', 'maps', 'map', 'google', 'map_url', 'loc', 'location']):
       if not url_col:
         url_col = col
+    elif any(k in c for k in ['مشروع', 'project', 'المشروع', 'project_name']):
+      project_col = col
     elif any(k in c for k in ['ملاحظات', 'note', 'notes', 'تفاصيل', 'ملاحظة', 'description', 'name', 'title']):
       if not note_col:
         note_col = col
-    elif any(k in c for k in ['مشروع', 'project', 'المشروع', 'project_name']):
-      project_col = col
 
   if lat_col is None or lon_col is None:
     for col in df.columns:
@@ -411,13 +391,13 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
 
     if lat_col is not None and pd.notna(row[lat_col]):
       try:
-        lat = float(str(row[lat_col]).strip())
+        lat = float(str(row[lat_col]).strip().replace(',', '.'))
       except Exception:
         pass
 
     if lon_col is not None and pd.notna(row[lon_col]):
       try:
-        lon = float(str(row[lon_col]).strip())
+        lon = float(str(row[lon_col]).strip().replace(',', '.'))
       except Exception:
         pass
 
@@ -444,9 +424,11 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
         if pd.notna(val) and str(val).strip() != '':
           extra_details[str(col)] = str(val).strip()
 
-    if lat and lon:
+    if lat is not None and lon is not None:
       if 34 <= lat <= 55 and 16 <= lon <= 32:
         lat, lon = lon, lat
+      if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        continue
 
       bulk_points.append({
           'lat': lat,
@@ -586,7 +568,7 @@ def save_links():
       new_points.append({
           'lat': float(p['lat']),
           'lon': float(p['lon']),
-          'note': note,
+          'note': (p.get('note') or '').strip() or note,
           'url': p.get('url') or '#',
           'project': project,
           'neighborhood': '-',
