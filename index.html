@@ -14,6 +14,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{--ink:#14212b;--mut:#6b7c88;--line:#e3e9ec;--bg:#f6f8f7;--acc:#0f8b8d;--acc2:#0b6e70;--amb:#f2a541;--red:#d64545}
 *{box-sizing:border-box}
@@ -25,7 +26,7 @@ button,input,select{font-family:inherit;font-size:13px}
 .ph{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
 .ph b{font-size:16px}
 .tabs{display:flex;padding:6px;gap:4px;border-bottom:1px solid var(--line)}
-.tab{flex:1;border:0;background:none;padding:8px 4px;border-radius:9px;cursor:pointer;color:var(--mut);font-weight:600}
+.tab{flex:1;border:0;background:none;padding:8px 2px;font-size:12px;white-space:nowrap;border-radius:9px;cursor:pointer;color:var(--mut);font-weight:600}
 .tab.on{background:var(--ink);color:#fff}
 .pane{display:none;padding:14px;overflow-y:auto;flex:1}.pane.on{display:block}
 label{display:block;font-size:12px;font-weight:600;color:var(--mut);margin:0 0 4px}
@@ -105,7 +106,7 @@ textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:
  <div class="ph"><b>إدارة الإحداثيات</b><button class="btn s" style="width:auto;padding:5px 10px" id="hidePanel">إخفاء</button></div>
  <div class="tabs">
   <button class="tab on" data-t="p1">النقاط</button><button class="tab" data-t="p2">إضافة</button>
-  <button class="tab" data-t="p3">الملفات</button><button class="tab" data-t="p4">الإعدادات</button>
+  <button class="tab" data-t="p3">الملفات</button><button class="tab" data-t="p5">الرسم والتحديد</button><button class="tab" data-t="p4">الإعدادات</button>
  </div>
 
  <div class="pane on" id="p1">
@@ -182,6 +183,16 @@ textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:
   <div class="row" style="margin-top:8px"><a class="btn s" style="text-align:center;text-decoration:none" href="/clear" onclick="return confirm('مسح كل النقاط؟')">مسح الخريطة</a><a class="btn s" style="text-align:center;text-decoration:none" href="/logout">خروج</a></div>
   <button class="btn d" id="clearAnno" style="margin-top:8px">مسح رسوماتي (نصوص وخطوط)</button>
  </div>
+ <div class="pane" id="p5">
+  <h4 style="margin-top:0">رسم النطاقات وتحديدها</h4>
+  <div style="font-size:12px;color:var(--mut);margin-bottom:8px;line-height:1.7">اضغط «رسم نطاق جديد»، ثم اضغط على الخريطة لتحديد الحدود نقطة بنقطة، وبعدها ✔ إنهاء من الشريط السفلي وأعطِه اسماً. أي نقطة (محفوظة أو رابط ملصوق) داخل النطاق تُنسب إليه تلقائياً.</div>
+  <button type="button" class="btn" id="drawZone">✏️ رسم نطاق جديد</button>
+  <div class="sep"></div>
+  <h4 style="margin-top:0">نطاقاتي المرسومة</h4>
+  <div id="zoneList" style="margin-bottom:10px"></div>
+  <button type="button" class="btn" id="zoneXlsx">تحميل إحداثيات نطاقات (Excel)</button>
+  <div style="font-size:11px;color:var(--mut);margin-top:6px">الملف يحتوي: النقاط مع نطاق كل نقطة، حدود النطاقات (الإحداثيات)، وملخص بالأعداد والمساحة.</div>
+ </div>
 </aside>
 
 <div id="credit">Designed By Ahmed Saif Alashry</div>
@@ -206,6 +217,7 @@ textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:
  <button class="tl" data-m="marker"><span>📍</span><small>نقطة</small></button>
  <button class="tl" data-m="text"><span>🔤</span><small>نص</small></button>
  <button class="tl" data-m="measure"><span>📏</span><small>قياس</small></button>
+ <button class="tl" data-m="zone"><span>⬠</span><small>نطاق</small></button>
  <button class="tl" id="finish" style="display:none"><span>✔</span><small>إنهاء</small></button>
  <button class="tl" id="palBtn"><span>🎨</span><small>أيقونات</small></button>
 </div>
@@ -437,13 +449,15 @@ function setMode(m){
   var prev = mode; mode = m; draft = []; draftGroup.clearLayers();
   if(m === 'marker'){ setScope('new'); document.getElementById('pal').classList.add('open'); if(prev !== 'marker') showToast('اختر الأيقونة ثم اضغط على الخريطة لوضعها، أو اضغط ＋'); }
   document.querySelectorAll('.tl[data-m]').forEach(function(b){ b.classList.toggle('on', b.getAttribute('data-m')===m); });
-  document.getElementById('finish').style.display = m==='measure' ? 'flex' : 'none';
+  document.getElementById('finish').style.display = (m==='measure' || m==='zone') ? 'flex' : 'none';
+  if(m === 'zone' && prev !== 'zone') showToast('اضغط على الخريطة لتحديد حدود النطاق، ثم ✔ إنهاء');
   map.getContainer().style.cursor = m==='none' ? '' : 'crosshair';
 }
 document.querySelectorAll('.tl[data-m]').forEach(function(b){ b.onclick = function(){ setMode(b.getAttribute('data-m')); }; });
 document.getElementById('finish').onclick = finishLine;
-document.addEventListener('keydown', function(e){ if(e.key==='Escape') setMode('none'); if(e.key==='Enter' && mode==='measure') finishLine(); });
+document.addEventListener('keydown', function(e){ if(e.key==='Escape') setMode('none'); if(e.key==='Enter' && (mode==='measure' || mode==='zone')) finishLine(); });
 function finishLine(){
+  if(mode === 'zone'){ finishZone(); return; }
   if(draft.length >= 2){ anno.push({ t:'line', pts:draft.slice(), color:cur.color }); saveAnno(); drawAnno(); }
   setMode('none');
 }
@@ -454,6 +468,10 @@ map.on('click', function(e){
   } else if(mode === 'text'){
     var tx = prompt('اكتب النص:', ''); if(!tx) return;
     anno.push({ t:'text', lat:ll[0], lon:ll[1], text:tx, color:cur.color==='#f2a541' ? '#b97a1e' : cur.color }); saveAnno(); drawAnno();
+  } else if(mode === 'zone'){
+    draft.push(ll); draftGroup.clearLayers();
+    L.polygon(draft, { color:cur.color, weight:3, fillColor:cur.color, fillOpacity:.12, dashArray:'6,6' }).addTo(draftGroup);
+    draft.forEach(function(p){ L.circleMarker(p, { radius:5, color:'#fff', weight:2, fillColor:cur.color, fillOpacity:1 }).addTo(draftGroup); });
   } else if(mode === 'measure'){
     draft.push(ll); draftGroup.clearLayers();
     drawPath(draft, draftGroup, cur.color);
@@ -547,6 +565,7 @@ function lkRender(fit){
   document.getElementById('lkInfo').textContent = urls.length
     ? (ok+' نقطة جاهزة'+(wait ? ' · '+wait+' قيد المعالجة' : '')+(fail ? ' · '+fail+' تعذر قراءتها' : ''))
     : 'الصق رابطاً وستظهر النقطة فوراً على الخريطة.';
+  if(typeof renderZoneList === 'function' && typeof zones !== 'undefined' && zones) renderZoneList();
   if(fit && !lkBusy && !lkQueue.length && ll.length){
     var pad = window.innerWidth > 700 ? [400, 20] : [20, window.innerHeight * 0.55];
     try{ map.fitBounds(ll, { paddingTopLeft:[20, 20], paddingBottomRight:pad, maxZoom:17 }); }catch(e){}
@@ -577,6 +596,120 @@ function lkSave(pdf){
 }
 document.getElementById('lkSave').onclick = function(){ lkSave(false); };
 document.getElementById('lkSavePdf').onclick = function(){ lkSave(true); };
+
+/* ---------- my zones: draw polygons, auto-assign points, export to Excel ---------- */
+var zones = (store('zones') || []).filter(function(z){ return z && z.ring && z.ring.length >= 3; });
+var zoneGroup = L.layerGroup().addTo(map);
+function saveZones(){ store('zones', zones.map(function(z){ return { name:z.name, color:z.color, ring:z.ring }; })); }
+function zr(z){ return z._r || (z._r = z.ring.map(function(p){ return [p[1], p[0]]; })); }
+function drawnZoneOf(lat, lon){
+  for(var i = 0; i < zones.length; i++){ if(ringHas(zr(zones[i]), lon, lat)) return zones[i]; }
+  return null;
+}
+/* every point on the map: saved ones, drawn markers, and links pasted but not saved yet */
+function allPoints(){
+  var out = [];
+  pts.forEach(function(p){ p.g.items.forEach(function(it){ out.push({ lat:p.g.lat, lon:p.g.lon, project:(p.g.project || '').trim(), note:it.note, src:'محفوظة' }); }); });
+  anno.forEach(function(a){ if(a.t === 'marker' && a.lat != null) out.push({ lat:a.lat, lon:a.lon, project:'رسوماتي', note:a.text || 'نقطة', src:'رسوماتي' }); });
+  if(lkText) lkUrls().forEach(function(u, i){
+    var r = lkRes[u]; if(!r || r.s !== 'ok') return;
+    out.push({ lat:r.lat, lon:r.lon, project:document.getElementById('lkProject').value.trim(), note:lkNoteFor(i) || 'موقع من رابط خرائط', src:'رابط غير محفوظ' });
+  });
+  return out;
+}
+function zonePopup(i){
+  var z = zones[i], n = allPoints().filter(function(p){ return drawnZoneOf(p.lat, p.lon) === z; }).length;
+  return '<div class="pop"><b class="h">' + esc(z.name) + '</b><i style="font-size:11px;color:#6b7c88">عدد النقاط داخله: ' + n + '</i><br>' +
+    '<button onclick="renameZone(' + i + ')">إعادة تسمية</button><button class="d" onclick="delZone(' + i + ')">حذف</button></div>';
+}
+function drawZones(){
+  zoneGroup.clearLayers();
+  zones.forEach(function(z, i){
+    var poly = L.polygon(z.ring, { color:z.color, weight:3, fillColor:z.color, fillOpacity:.15 }).addTo(zoneGroup);
+    poly.on('click', function(e){ if(mode !== 'none') return; L.popup().setLatLng(e.latlng).setContent(zonePopup(i)).openOn(map); });
+    L.marker(poly.getBounds().getCenter(), { interactive:false, icon:L.divIcon({ className:'', iconSize:[0, 0], html:'<div class="tx" style="background:' + z.color + '">' + esc(z.name) + '</div>' }) }).addTo(zoneGroup);
+  });
+  renderZoneList();
+}
+function renderZoneList(){
+  var box = document.getElementById('zoneList'); if(!box) return;
+  if(!zones.length){ box.innerHTML = '<small style="color:var(--mut)">لا توجد نطاقات مرسومة بعد.</small>'; return; }
+  var counts = zones.map(function(){ return 0; });
+  allPoints().forEach(function(p){ var z = drawnZoneOf(p.lat, p.lon); if(z) counts[zones.indexOf(z)]++; });
+  box.innerHTML = zones.map(function(z, i){
+    return '<div class="lk"><span style="width:12px;height:12px;border-radius:50%;flex:none;background:' + z.color + '"></span><b style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(z.name) + '</b>' +
+      '<span style="color:var(--mut)">' + counts[i] + ' نقطة</span>' +
+      '<button type="button" data-a="go" data-i="' + i + '" title="تكبير">🔍</button><button type="button" data-a="ren" data-i="' + i + '" title="إعادة تسمية">✎</button><button type="button" data-a="del" data-i="' + i + '" title="حذف">✕</button></div>';
+  }).join('');
+}
+function renameZone(i){
+  var n = prompt('اسم النطاق:', zones[i].name);
+  if(n && n.trim()){ zones[i].name = n.trim(); saveZones(); drawZones(); map.closePopup(); }
+}
+function delZone(i){
+  if(!confirm('حذف النطاق «' + zones[i].name + '»؟')) return;
+  zones.splice(i, 1); saveZones(); drawZones(); map.closePopup();
+}
+function finishZone(){
+  if(draft.length < 3){ showToast('النطاق يحتاج 3 نقاط على الأقل'); return; }
+  var nm = prompt('اسم النطاق:', 'نطاق ' + (zones.length + 1));
+  if(nm === null) return;
+  zones.push({ name:nm.trim() || ('نطاق ' + (zones.length + 1)), color:cur.color, ring:draft.slice() });
+  saveZones(); drawZones(); setMode('none'); showToast('تم حفظ النطاق');
+}
+document.getElementById('zoneList').addEventListener('click', function(e){
+  var b = e.target.closest('button'); if(!b) return;
+  var i = +b.getAttribute('data-i'), a = b.getAttribute('data-a');
+  if(a === 'go') map.fitBounds(L.polygon(zones[i].ring).getBounds(), { paddingTopLeft:[20, 20], paddingBottomRight:[400, 20] });
+  else if(a === 'ren') renameZone(i);
+  else if(a === 'del') delZone(i);
+});
+/* approximate area (km²) with a local equirectangular projection */
+function ringAreaKm2(ring){
+  var R = 6371.0088, rad = Math.PI / 180, lat0 = 0;
+  ring.forEach(function(p){ lat0 += p[0]; }); lat0 = lat0 / ring.length * rad;
+  var xy = ring.map(function(p){ return [R * p[1] * rad * Math.cos(lat0), R * p[0] * rad]; }), a = 0;
+  for(var i = 0, j = xy.length - 1; i < xy.length; j = i++) a += xy[j][0] * xy[i][1] - xy[i][0] * xy[j][1];
+  return Math.abs(a) / 2;
+}
+async function exportZonesXlsx(){
+  if(typeof XLSX === 'undefined'){ alert('تعذر تحميل مكتبة Excel، تأكد من الاتصال بالإنترنت'); return; }
+  if(!zones.length){ showToast('ارسم نطاقاً واحداً على الأقل أولاً'); return; }
+  await waitLinks();
+  var OUT = 'خارج النطاقات', P = allPoints();
+  P.forEach(function(p){ var z = drawnZoneOf(p.lat, p.lon); p.zone = z ? z.name : OUT; p.zi = z ? zones.indexOf(z) : zones.length; p.url = goUrl(p.lat, p.lon); });
+  P.sort(function(a, b){ return a.zi - b.zi || natCmp(a.note, b.note); });
+
+  var s1 = [['م', 'النطاق', 'المشروع', 'الملاحظة', 'Lat', 'Lon', 'رابط الموقع', 'المصدر']];
+  P.forEach(function(p, i){ s1.push([i + 1, p.zone, p.project || '-', p.note, +p.lat.toFixed(6), +p.lon.toFixed(6), p.url, p.src]); });
+  var ws1 = XLSX.utils.aoa_to_sheet(s1);
+  P.forEach(function(p, i){ var c = ws1[XLSX.utils.encode_cell({ r:i + 1, c:6 })]; if(c) c.l = { Target:p.url, Tooltip:'فتح في خرائط جوجل' }; });
+  ws1['!cols'] = [{ wch:6 }, { wch:22 }, { wch:22 }, { wch:36 }, { wch:12 }, { wch:12 }, { wch:44 }, { wch:16 }];
+
+  var s2 = [['النطاق', 'رقم الرأس', 'Lat', 'Lon']];
+  zones.forEach(function(z){ z.ring.forEach(function(p, k){ s2.push([z.name, k + 1, +p[0].toFixed(6), +p[1].toFixed(6)]); }); });
+  var ws2 = XLSX.utils.aoa_to_sheet(s2);
+  ws2['!cols'] = [{ wch:24 }, { wch:11 }, { wch:12 }, { wch:12 }];
+
+  var s3 = [['النطاق', 'عدد النقاط', 'عدد الرؤوس', 'المساحة التقريبية (كم²)']];
+  zones.forEach(function(z, i){ s3.push([z.name, P.filter(function(p){ return p.zi === i; }).length, z.ring.length, +ringAreaKm2(z.ring).toFixed(3)]); });
+  var outN = P.filter(function(p){ return p.zi === zones.length; }).length;
+  if(outN) s3.push([OUT, outN, '', '']);
+  var ws3 = XLSX.utils.aoa_to_sheet(s3);
+  ws3['!cols'] = [{ wch:24 }, { wch:12 }, { wch:12 }, { wch:24 }];
+
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, 'النقاط');
+  XLSX.utils.book_append_sheet(wb, ws2, 'حدود النطاقات');
+  XLSX.utils.book_append_sheet(wb, ws3, 'ملخص');
+  wb.Workbook = { Views:[{ RTL:true }, { RTL:true }, { RTL:true }] };
+  var d = new Date();
+  XLSX.writeFile(wb, 'zones_coordinates_' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.xlsx');
+  showToast('تم تحميل ملف Excel: ' + P.length + ' نقطة، ' + zones.length + ' نطاق');
+}
+document.getElementById('zoneXlsx').onclick = exportZonesXlsx;
+document.getElementById('drawZone').onclick = function(){ setMode('zone'); };
+drawZones();
 
 /* ---------- map screenshot as image ---------- */
 document.getElementById('shot').onclick = function(){
@@ -712,7 +845,7 @@ function zoneOfPoint(lat, lon){
 /* Report rows: grouped by zone, nearest-neighbour order, numbered 1..N (same numbers on map, cards and table) */
 function buildEntries(){
   var groups = {};
-  function add(z, o){ (groups[z] = groups[z] || []).push(o); }
+  function add(z, o){ var dz = drawnZoneOf(o.lat, o.lon); if(dz){ z = dz.name; o.zone = z; } (groups[z] = groups[z] || []).push(o); }
   pts.forEach(function(p){
     p.g.items.forEach(function(it){
       var z = (it.round_id && it.round_id !== '-') ? it.round_id : NOZ;
@@ -754,6 +887,7 @@ function renderReportMap(entries, w, h){
     try{
       var ll = [];
       entries.forEach(function(e){ ll.push([e.lat, e.lon]); });
+      zones.forEach(function(z){ z.ring.forEach(function(p){ ll.push(p); }); });
       anno.forEach(function(a){
         if(a.t === 'line') a.pts.forEach(function(p){ ll.push(p); });
         else if(a.t === 'text' && a.lat != null) ll.push([a.lat, a.lon]);
@@ -782,6 +916,12 @@ function renderReportMap(entries, w, h){
           sl.eachLayer(function(l){ try{ label('tx', esc(zoneId(l.feature.properties)), l.getBounds().getCenter()).addTo(rm); }catch(e){} });
         }
       }
+
+      /* my drawn zones */
+      zones.forEach(function(z){
+        var poly = L.polygon(z.ring, { color:z.color, weight:3, fillColor:z.color, fillOpacity:.15, interactive:false }).addTo(rm);
+        L.marker(poly.getBounds().getCenter(), { interactive:false, icon:L.divIcon({ className:'', iconSize:[0, 0], html:'<div class="tx" style="background:' + z.color + '">' + esc(z.name) + '</div>' }) }).addTo(rm);
+      });
 
       /* user drawings (lines + text); drawn markers are numbered like the other points */
       var grp = L.layerGroup().addTo(rm);
