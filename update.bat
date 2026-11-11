@@ -1,0 +1,7 @@
+@echo off
+cd /d "%~dp0"
+git add -A
+git commit -m "update %date% %time%"
+git pull --rebase origin main
+git push origin main
+pause
