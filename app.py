@@ -33,21 +33,31 @@ app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB uploads
 USERNAME = os.environ.get('APP_USERNAME', 'admin')
 PASSWORD = os.environ.get('APP_PASSWORD', '123')
 
-COORD_PATTERNS = [
-    r'@(-?\d+\.\d+),(-?\d+\.\d+)',
-    r'[?&](?:q|ll|query|destination|center)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)',
-    r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)',
-]
+# Order matters. In a Google Maps link:
+#   !3d<lat>!4d<lon>  = the exact pin of the place (most accurate)
+#   q= / query= / ll=  = an explicit coordinate
+#   @<lat>,<lon>       = only the CENTER OF THE VIEWPORT, which can be far from the pin
+# The old code tried "@" first, which is what produced wrong locations.
+PIN_PATTERN = r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)'
+QUERY_PATTERN = r'[?&](?:q|ll|query|destination)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)'
+VIEW_PATTERN = r'@(-?\d+\.\d+),(-?\d+\.\d+)'
+CENTER_PATTERN = r'[?&;]center=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)'
+
+URL_PATTERNS = [PIN_PATTERN, QUERY_PATTERN, VIEW_PATTERN, CENTER_PATTERN]
+# Page HTML contains many unrelated numbers: never trust "@..." there.
+HTML_PATTERNS = [PIN_PATTERN, QUERY_PATTERN, CENTER_PATTERN]
 
 
-def _find_coords(text):
+def _find_coords(text, patterns=None):
   if not text:
     return None
   text = unquote(text)
-  for pattern in COORD_PATTERNS:
+  for pattern in patterns or URL_PATTERNS:
     m = re.search(pattern, text)
     if m:
-      return float(m.group(1)), float(m.group(2))
+      lat, lon = float(m.group(1)), float(m.group(2))
+      if -90 <= lat <= 90 and -180 <= lon <= 180:
+        return lat, lon
   return None
 
 
@@ -84,6 +94,7 @@ def get_real_coordinates_from_url(short_url):
     response = requests.get(
         short_url, headers=headers, allow_redirects=True, timeout=8
     )
+    # Final URL first, then every redirect hop (the pin may only be in one hop).
     found = _find_coords(response.url)
     if found:
       return found
@@ -91,7 +102,12 @@ def get_real_coordinates_from_url(short_url):
       found = _find_coords(r.headers.get('Location', ''))
       if found:
         return found
-    found = _find_coords(response.text[:300000])
+    # Google sometimes answers with a consent / captcha page: its HTML has
+    # nothing to do with the requested place, so never read coordinates from it.
+    host = (urlparse(response.url).hostname or '').lower()
+    if host.startswith('consent.') or 'sorry' in response.url:
+      return None, None
+    found = _find_coords(response.text[:300000], HTML_PATTERNS)
     if found:
       return found
   except Exception:
@@ -338,7 +354,49 @@ def enrich_locations_with_shape_data(locations, proj_id):
   return locations
 
 
+_NUM_TABLE = str.maketrans('٠١٢٣٤٥٦٧٨٩٫', '0123456789.', '٬')
+LAT_NAMES = {'lat', 'latitude', 'y', 'lat.', 'خط العرض', 'خط_العرض', 'العرض'}
+LON_NAMES = {'lon', 'lng', 'long', 'longitude', 'x', 'lon.', 'long.', 'خط الطول', 'خط_الطول', 'الطول'}
+
+
+def _to_float(val):
+  """Reads a number from a cell: Arabic digits, decimal comma, degree sign..."""
+  if val is None:
+    return None
+  if isinstance(val, (int, float)):
+    return None if pd.isna(val) else float(val)
+  s = str(val).translate(_NUM_TABLE).strip()
+  if s.count(',') == 1 and '.' not in s:
+    s = s.replace(',', '.')
+  m = re.search(r'-?\d+(?:\.\d+)?', s)
+  return float(m.group(0)) if m else None
+
+
+def _pick_lat_lon_columns(columns):
+  """Exact names win; the loose substring match is only a fallback and the
+  FIRST match is kept (the old code let the last matching column win)."""
+  names = {col: str(col).strip().lower() for col in columns}
+  lat_col = next((c for c, n in names.items() if n in LAT_NAMES), None)
+  lon_col = next((c for c, n in names.items() if n in LON_NAMES), None)
+  if lat_col is None:
+    lat_col = next((c for c, n in names.items()
+                    if c != lon_col and (re.search(r'(^|[^a-z])lat', n) or 'خط العرض' in n)), None)
+  if lon_col is None:
+    lon_col = next((c for c, n in names.items()
+                    if c != lat_col and (re.search(r'(^|[^a-z])(lon|lng)', n) or 'خط الطول' in n)), None)
+  return lat_col, lon_col
+
+
+def _has_link(df, col):
+  try:
+    return bool(df[col].astype(str).str.contains('http', na=False).any())
+  except Exception:
+    return False
+
+
 def process_excel_file_to_chunks(file_path, chunk_size=200):
+  """Returns (number_of_chunks, stats). stats explains what was skipped/fixed."""
+  stats = {'rows': 0, 'skipped': 0, 'swapped': 0, 'bad_links': 0}
   try:
     df = pd.read_excel(file_path)
   except Exception:
@@ -350,63 +408,63 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
       except Exception:
         continue
     if df is None:
-      return 0
+      return 0, stats
 
   if df.empty or len(df.columns) == 0:
-    return 0
+    return 0, stats
+  stats['rows'] = len(df)
 
-  lat_col, lon_col, url_col, note_col, project_col = None, None, None, None, None
+  lat_col, lon_col = _pick_lat_lon_columns(df.columns)
+  note_col, project_col = None, None
+  url_candidates = []
 
   for col in df.columns:
+    if col == lat_col or col == lon_col:
+      continue
     c = str(col).strip().lower()
-    if any(k in c for k in ['lat', 'latitude', 'خط العرض', 'خط_العرض', 'العرض', 'lat.']):
-      if not any(x in c for x in ['long', 'lon', 'الطول', 'خط الطول']):
-        lat_col = col
-    elif any(k in c for k in ['lon', 'long', 'longitude', 'خط الطول', 'خط_الطول', 'الطول', 'lon.', 'long.']):
-      lon_col = col
-    elif any(k in c for k in ['url', 'link', 'رابط', 'maps', 'map', 'google', 'map_url', 'loc', 'location']):
-      if not url_col:
-        url_col = col
+    if any(k in c for k in ['url', 'link', 'رابط', 'maps', 'map', 'google', 'map_url', 'loc', 'location']):
+      url_candidates.append(col)
     elif any(k in c for k in ['مشروع', 'project', 'المشروع', 'project_name']):
-      project_col = col
+      if project_col is None:
+        project_col = col
     elif any(k in c for k in ['ملاحظات', 'note', 'notes', 'تفاصيل', 'ملاحظة', 'description', 'name', 'title']):
-      if not note_col:
+      if note_col is None:
         note_col = col
 
-  if lat_col is None or lon_col is None:
-    for col in df.columns:
-      c = str(col).strip().lower()
-      if lat_col is None and ('y' == c or 'lat' in c or 'عرض' in c):
-        lat_col = col
-      if lon_col is None and ('x' == c or 'lon' in c or 'long' in c or 'طول' in c):
-        lon_col = col
+  # A column called "Location" often holds a text address, not the link.
+  # Prefer the candidate that really contains links.
+  url_col = next((c for c in url_candidates if _has_link(df, c)), None)
+  if url_col is None:
+    url_col = next(
+        (c for c in df.columns
+         if c not in (lat_col, lon_col) and _has_link(df, c)),
+        url_candidates[0] if url_candidates else None,
+    )
 
   bulk_points = []
 
   for index, row in df.iterrows():
     lat, lon, maps_url = None, None, ''
+    from_file = False
     note = f'نقطة كشف #{index + 1}'
     project_name = ' '
     extra_details = {}
 
-    if lat_col is not None and pd.notna(row[lat_col]):
-      try:
-        lat = float(str(row[lat_col]).strip().replace(',', '.'))
-      except Exception:
-        pass
-
-    if lon_col is not None and pd.notna(row[lon_col]):
-      try:
-        lon = float(str(row[lon_col]).strip().replace(',', '.'))
-      except Exception:
-        pass
+    if lat_col is not None:
+      lat = _to_float(row[lat_col])
+    if lon_col is not None:
+      lon = _to_float(row[lon_col])
+    from_file = lat is not None and lon is not None
 
     if url_col is not None and pd.notna(row[url_col]):
       maps_url = str(row[url_col]).strip()
 
     if (lat is None or lon is None) and maps_url:
+      lat, lon = None, None
       if 'http' in maps_url or 'maps' in maps_url or 'goo.gl' in maps_url:
         lat, lon = get_real_coordinates_from_url(maps_url)
+      if lat is None:
+        stats['bad_links'] += 1
 
     if note_col is not None and pd.notna(row[note_col]):
       val = row[note_col]
@@ -424,10 +482,17 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
         if pd.notna(val) and str(val).strip() != '':
           extra_details[str(col)] = str(val).strip()
 
-    if lat is not None and lon is not None:
-      if 34 <= lat <= 55 and 16 <= lon <= 32:
+    if lat is None or lon is None:
+      stats['skipped'] += 1
+    else:
+      # Only values typed in the file can be swapped by mistake (lat/lon
+      # columns reversed). Coordinates read from a Google link are exact and
+      # must never be "corrected".
+      if from_file and 34 <= lat <= 55 and 16 <= lon <= 32:
         lat, lon = lon, lat
+        stats['swapped'] += 1
       if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        stats['skipped'] += 1
         continue
 
       bulk_points.append({
@@ -441,7 +506,7 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
       })
 
   if not bulk_points:
-    return 0
+    return 0, stats
 
   existing_chunks = load_chunks()
   new_chunks = []
@@ -459,7 +524,7 @@ def process_excel_file_to_chunks(file_path, chunk_size=200):
 
   existing_chunks.extend(new_chunks)
   save_chunks(existing_chunks)
-  return len(new_chunks)
+  return len(new_chunks), stats
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -675,7 +740,7 @@ def index():
             path = os.path.join(temp_dir, f'temp_excel_{uuid.uuid4().hex}.xlsx')
             file.save(path)
             try:
-              num_chunks = process_excel_file_to_chunks(
+              num_chunks, up_stats = process_excel_file_to_chunks(
                   path, chunk_size=chunk_size_val
               )
             finally:
@@ -683,6 +748,12 @@ def index():
                 os.remove(path)
             if num_chunks > 0:
               message = f'تمت معالجة الملف وتقسيمه إلى {num_chunks} مجموعات (بحجم {chunk_size_val} نقطة لكل مجموعة) بنجاح!'
+              if up_stats['skipped']:
+                message += f' | تم تخطي {up_stats["skipped"]} صف بدون إحداثيات صالحة'
+              if up_stats['bad_links']:
+                message += f' ({up_stats["bad_links"]} رابط تعذر قراءته)'
+              if up_stats['swapped']:
+                message += f' | تم عكس ترتيب {up_stats["swapped"]} نقطة (خط الطول/العرض)'
             else:
               message = 'تعذر استخراج بيانات صحيحة من الملف!'
           except Exception as e:
